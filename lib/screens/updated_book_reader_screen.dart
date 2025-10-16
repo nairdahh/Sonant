@@ -1,46 +1,50 @@
-// lib/screens/book_reader_screen.dart
+// lib/screens/updated_book_reader_screen.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart'; // Pentru TapGestureRecognizer
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:just_audio/just_audio.dart';
-import '../models/book_models.dart';
-import '../models/polly_response.dart';
-import '../services/book_parser_service.dart';
+import '../services/advanced_book_parser_service.dart';
 import '../services/polly_service.dart';
+import '../models/polly_response.dart';
+import '../widgets/highlighted_text_widget.dart';
 
-class BookReaderScreen extends StatefulWidget {
-  const BookReaderScreen({super.key});
+class UpdatedBookReaderScreen extends StatefulWidget {
+  const UpdatedBookReaderScreen({super.key});
 
   @override
-  State<BookReaderScreen> createState() => _BookReaderScreenState();
+  State<UpdatedBookReaderScreen> createState() =>
+      _UpdatedBookReaderScreenState();
 }
 
-class _BookReaderScreenState extends State<BookReaderScreen> {
-  final BookParserService _bookParser = BookParserService();
+class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
+  final AdvancedBookParser _bookParser = AdvancedBookParser();
   final PollyService _pollyService = PollyService();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final PageController _pageController = PageController();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  Book? _currentBook;
+  ParsedBook? _currentBook;
   int _currentPageIndex = 0;
   bool _isLoading = false;
   bool _isLoadingAudio = false;
   double _audioLoadProgress = 0.0;
   String _selectedVoice = 'Joanna';
+  bool _isPlaying = false;
 
-  // Cache pentru audio generat per pagină
   Map<int, PollyResponse> _audioCache = {};
-
   List<SpeechMark> _speechMarks = [];
+  List<WordHighlight> _wordHighlights = [];
   int _currentWordIndex = -1;
   StreamSubscription<Duration>? _positionSubscription;
 
   @override
   void initState() {
     super.initState();
+
+    // Track audio position pentru highlight
     _positionSubscription = _audioPlayer.positionStream.listen((position) {
       if (_speechMarks.isEmpty) return;
 
@@ -56,94 +60,58 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
       }
     });
 
-    // 🎯 Listener pentru auto-avans și citire continuă
+    // Auto-avans între pagini
     _audioPlayer.playerStateStream.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state.playing;
+        });
+      }
+
       if (state.processingState == ProcessingState.completed) {
-        // Verificăm că audio-ul chiar s-a terminat complet
         if (_audioPlayer.position >= (_audioPlayer.duration ?? Duration.zero)) {
-          debugPrint(
-              '✅ Audio terminat complet, trecem la următoarea pagină...');
-
-          if (mounted) {
-            // Verificăm dacă mai există pagini următoare
-            if (_currentPageIndex < (_currentBook?.pages.length ?? 0) - 1) {
-              // Trecem la următoarea pagină
-              _currentPageIndex++;
-              _pageController.animateToPage(
-                _currentPageIndex,
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeInOut,
-              );
-
-              // 🔥 Continuăm citirea automat + generăm următoarele 2
-              Future.delayed(const Duration(milliseconds: 500), () async {
-                if (mounted) {
-                  // Redăm pagina curentă (ar trebui să fie în cache)
-                  if (_audioCache.containsKey(_currentPageIndex)) {
-                    debugPrint(
-                        '⚡ Redăm automat pagina $_currentPageIndex din cache');
-                    final cachedResponse = _audioCache[_currentPageIndex]!;
-                    setState(() {
-                      _speechMarks = cachedResponse.speechMarks;
-                      _currentWordIndex = -1;
-                    });
-                    await _audioPlayer.setUrl(cachedResponse.audioUrl!);
-                    _audioPlayer.play();
-
-                    // 🎵 Generăm în fundal următoarele 2 pagini
-                    _preloadNext2Pages();
-                  } else {
-                    debugPrint(
-                        '⚠️ Pagina $_currentPageIndex nu e în cache, generăm acum...');
-                    await _playCurrentPage();
-                  }
-                }
-              });
-            } else {
-              debugPrint('📖 Ultima pagină - citire completă!');
-              if (mounted) {
-                setState(() {
-                  _currentWordIndex = -1;
-                });
-              }
-            }
-          }
+          _handleAudioComplete();
         }
       }
     });
   }
 
-  // 🎵 Generează următoarele 2 pagini în fundal (doar cele noi)
-  void _preloadNext2Pages() {
-    if (_currentBook == null) return;
+  void _handleAudioComplete() {
+    if (!mounted) return;
 
-    final pagesToPreload = <int>[];
+    debugPrint('✅ Audio terminat, trecem la următoarea pagină...');
 
-    // Următoarele 2 pagini
-    for (int i = 1; i <= 2; i++) {
-      final pageIdx = _currentPageIndex + i;
-      if (pageIdx < _currentBook!.pages.length &&
-          !_audioCache.containsKey(pageIdx)) {
-        pagesToPreload.add(pageIdx);
-      }
-    }
-
-    if (pagesToPreload.isEmpty) {
-      debugPrint('⚡ Următoarele 2 pagini deja în cache');
-      return;
-    }
-
-    debugPrint('🎵 [FUNDAL] Începem generarea: $pagesToPreload');
-
-    // ✅ Generăm async în fundal fără await - NU blochează audio-ul!
-    Future.microtask(() async {
-      for (final pageIdx in pagesToPreload) {
-        debugPrint('🎵 [FUNDAL] Generăm pagina ${pageIdx + 1}...');
-        await _preloadPageAudio(pageIdx);
-        debugPrint('✅ [FUNDAL] Pagina ${pageIdx + 1} gata!');
-      }
-      debugPrint('✅ [FUNDAL] Toate paginile generate!');
+    setState(() {
+      _isPlaying = false;
     });
+
+    if (_currentPageIndex < (_currentBook?.pages.length ?? 0) - 1) {
+      _currentPageIndex++;
+
+      if (_pageController.hasClients) {
+        _pageController.animateToPage(
+          _currentPageIndex,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+        );
+      }
+
+      Future.delayed(const Duration(milliseconds: 500), () async {
+        if (mounted) {
+          if (_audioCache.containsKey(_currentPageIndex)) {
+            await _playFromCache(_currentPageIndex);
+          } else {
+            await _playCurrentPage();
+          }
+        }
+      });
+    } else {
+      debugPrint('📖 Ultima pagină - citire completă!');
+      setState(() {
+        _currentWordIndex = -1;
+        _isPlaying = false;
+      });
+    }
   }
 
   Future<void> _pickBook() async {
@@ -166,6 +134,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
           _currentPageIndex = 0;
           _isLoading = false;
           _speechMarks = [];
+          _wordHighlights = [];
           _currentWordIndex = -1;
           _audioCache = {};
           _audioPlayer.stop();
@@ -176,14 +145,87 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  'Carte încărcată: ${book.title}\n${book.pages.length} pagini'),
+                'Carte încărcată: ${book.title}\n'
+                '${book.chapters.length} capitole, ${book.pages.length} pagini',
+              ),
               duration: const Duration(seconds: 2),
             ),
           );
-          // ❌ NU mai pregenerăm automat
         }
       }
     }
+  }
+
+  Future<void> _playCurrentPage() async {
+    if (_currentBook == null ||
+        _currentPageIndex >= _currentBook!.pages.length) {
+      return;
+    }
+
+    if (_audioCache.containsKey(_currentPageIndex)) {
+      await _playFromCache(_currentPageIndex);
+      _preloadNext2Pages();
+      return;
+    }
+
+    setState(() {
+      _isLoadingAudio = true;
+      _audioLoadProgress = 0.0;
+    });
+
+    try {
+      final pagesToGenerate = <int>[];
+      for (int i = 0; i < 3; i++) {
+        final pageIdx = _currentPageIndex + i;
+        if (pageIdx < _currentBook!.pages.length &&
+            !_audioCache.containsKey(pageIdx)) {
+          pagesToGenerate.add(pageIdx);
+        }
+      }
+
+      for (int i = 0; i < pagesToGenerate.length; i++) {
+        final pageIdx = pagesToGenerate[i];
+        if (mounted) {
+          setState(() => _audioLoadProgress = (i + 1) / pagesToGenerate.length);
+        }
+        await _preloadPageAudio(pageIdx);
+      }
+
+      if (_audioCache.containsKey(_currentPageIndex) && mounted) {
+        await _playFromCache(_currentPageIndex);
+      }
+    } catch (e) {
+      debugPrint('❌ Eroare la redarea paginii: $e');
+    }
+
+    if (mounted) {
+      setState(() => _isLoadingAudio = false);
+    }
+  }
+
+  Future<void> _playFromCache(int pageIndex) async {
+    final cachedResponse = _audioCache[pageIndex]!;
+
+    // Pregătim highlight-urile pentru pagina curentă
+    final page = _currentBook!.pages[pageIndex];
+    _wordHighlights = cachedResponse.speechMarks
+        .where((mark) =>
+            mark.start >= page.startCharIndex && mark.start < page.endCharIndex)
+        .map((mark) => WordHighlight(
+              start: mark.start - page.startCharIndex,
+              end: mark.end - page.startCharIndex,
+              word: mark.value,
+            ))
+        .toList();
+
+    setState(() {
+      _speechMarks = cachedResponse.speechMarks;
+      _currentWordIndex = -1;
+    });
+
+    await _audioPlayer.setUrl(cachedResponse.audioUrl!);
+    _audioPlayer.play();
+    _preloadNext2Pages();
   }
 
   Future<void> _preloadPageAudio(int pageIndex) async {
@@ -192,19 +234,15 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     }
 
     if (_audioCache.containsKey(pageIndex)) {
-      debugPrint('⚡ Pagina ${pageIndex + 1} deja în cache, skip');
       return;
     }
-
-    debugPrint('🎵 START generare pagina ${pageIndex + 1}...');
 
     try {
       final page = _currentBook!.pages[pageIndex];
 
-      // Verificăm dacă pagina e prea lungă
       if (page.content.length > 2900) {
         debugPrint(
-            '⚠️ Pagina ${pageIndex + 1} prea lungă (${page.content.length} char), va fi trunChiată');
+            '⚠️ Pagina ${pageIndex + 1} prea lungă (${page.content.length} char)');
       }
 
       final pollyResponse = await _pollyService.synthesizeSpeech(
@@ -228,210 +266,117 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
           speechMarks: adjustedMarks,
         );
 
-        debugPrint('✅ DONE pagina ${pageIndex + 1} → Cache');
+        debugPrint('✅ Pagina ${pageIndex + 1} → Cache');
       }
     } catch (e) {
       debugPrint('❌ EROARE pagina ${pageIndex + 1}: $e');
     }
   }
 
-  Future<void> _playCurrentPage() async {
-    if (_currentBook == null ||
-        _currentPageIndex >= _currentBook!.pages.length) {
-      return;
-    }
+  void _preloadNext2Pages() {
+    if (_currentBook == null) return;
 
-    // Verificăm dacă avem deja audio în cache pentru pagina curentă
-    if (_audioCache.containsKey(_currentPageIndex)) {
-      debugPrint('⚡ Folosim audio din cache pentru pagina $_currentPageIndex');
-
-      final cachedResponse = _audioCache[_currentPageIndex]!;
-
-      setState(() {
-        _speechMarks = cachedResponse.speechMarks;
-        _currentWordIndex = -1;
-      });
-
-      await _audioPlayer.setUrl(cachedResponse.audioUrl!);
-      _audioPlayer.play();
-
-      // 🎵 Generăm în fundal următoarele 2 pagini
-      _preloadNext2Pages();
-      return;
-    }
-
-    // Generăm pagina curentă + următoarele 2 (total 3 pagini)
-    setState(() {
-      _isLoadingAudio = true;
-      _audioLoadProgress = 0.0;
-    });
-
-    debugPrint('🎵 Generăm audio pentru pagina curentă + următoarele 2...');
-
-    try {
-      // Pregătim paginile de generat (curentă + max 2 următoare)
-      final pagesToGenerate = <int>[];
-      for (int i = 0; i < 3; i++) {
-        final pageIdx = _currentPageIndex + i;
-        if (pageIdx < _currentBook!.pages.length &&
-            !_audioCache.containsKey(pageIdx)) {
-          pagesToGenerate.add(pageIdx);
-        }
+    final pagesToPreload = <int>[];
+    for (int i = 1; i <= 2; i++) {
+      final pageIdx = _currentPageIndex + i;
+      if (pageIdx < _currentBook!.pages.length &&
+          !_audioCache.containsKey(pageIdx)) {
+        pagesToPreload.add(pageIdx);
       }
+    }
 
-      debugPrint(
-          '📄 Vom genera ${pagesToGenerate.length} pagini: $pagesToGenerate');
+    if (pagesToPreload.isEmpty) return;
 
-      // Generăm fiecare pagină
-      for (int i = 0; i < pagesToGenerate.length; i++) {
-        final pageIdx = pagesToGenerate[i];
-
-        if (mounted) {
-          setState(() => _audioLoadProgress = (i + 1) / pagesToGenerate.length);
-        }
-
+    Future.microtask(() async {
+      for (final pageIdx in pagesToPreload) {
         await _preloadPageAudio(pageIdx);
       }
-
-      // După generare, pornim audio-ul pentru pagina curentă
-      if (_audioCache.containsKey(_currentPageIndex) && mounted) {
-        final cachedResponse = _audioCache[_currentPageIndex]!;
-
-        setState(() {
-          _speechMarks = cachedResponse.speechMarks;
-          _currentWordIndex = -1;
-        });
-
-        await _audioPlayer.setUrl(cachedResponse.audioUrl!);
-        _audioPlayer.play();
-      }
-    } catch (e) {
-      debugPrint('❌ Eroare la redarea paginii: $e');
-    }
-
-    if (mounted) {
-      setState(() => _isLoadingAudio = false);
-    }
-  }
-
-  void _stopAudio() {
-    _audioPlayer.stop();
-    setState(() {
-      _currentWordIndex = -1;
-      _speechMarks = [];
     });
   }
 
-  void _preloadNextPage(int currentPageIndex) {
-    // ❌ Nu mai facem pregenerare automată la schimbarea paginii
-    // Generarea se face DOAR când user apasă Play
-    return;
-  }
-
-  // 🎯 Funcție pentru a începe redarea de la un cuvânt specific
-  void _playFromWord(int markIndex) async {
+  void _playFromWord(int wordIndex) async {
     if (_speechMarks.isEmpty ||
-        markIndex < 0 ||
-        markIndex >= _speechMarks.length) {
+        wordIndex < 0 ||
+        wordIndex >= _speechMarks.length) {
       return;
     }
 
-    final mark = _speechMarks[markIndex];
-    final timeToSeek = mark.time;
+    final mark = _speechMarks[wordIndex];
 
-    debugPrint(
-        '🎯 Click pe cuvânt: "${mark.value}" - Sărim la ${timeToSeek}ms');
-
-    // Dacă audio-ul nu e încărcat, îl încărcăm
     if (_audioPlayer.duration == null &&
         _audioCache.containsKey(_currentPageIndex)) {
       final cachedResponse = _audioCache[_currentPageIndex]!;
       await _audioPlayer.setUrl(cachedResponse.audioUrl!);
     }
 
-    // Sărim la timpul corespunzător
-    await _audioPlayer.seek(Duration(milliseconds: timeToSeek));
-
-    // Pornim redarea
+    await _audioPlayer.seek(Duration(milliseconds: mark.time));
     _audioPlayer.play();
 
-    // Actualizăm highlight-ul
     setState(() {
-      _currentWordIndex = markIndex;
+      _currentWordIndex = wordIndex;
     });
   }
 
-  List<TextSpan> _buildTextSpans(String content, int pageStartIndex) {
-    // Dacă nu avem speech marks, returnăm textul simplu
-    if (content.isEmpty || _speechMarks.isEmpty) {
-      return [TextSpan(text: content)];
-    }
+  void _stopAudio() {
+    _audioPlayer.stop();
+    setState(() {
+      _currentWordIndex = -1;
+    });
+  }
 
-    List<TextSpan> spans = [];
-    int textPointer = 0;
+  void _showTableOfContents() {
+    if (_currentBook == null) return;
 
-    final pageEndIndex = pageStartIndex + content.length;
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Cuprins',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _currentBook!.chapters.length,
+                itemBuilder: (context, index) {
+                  final chapter = _currentBook!.chapters[index];
+                  return ListTile(
+                    leading: CircleAvatar(
+                      child: Text('${chapter.number}'),
+                    ),
+                    title: Text(chapter.title),
+                    subtitle: Text(
+                      chapter.isSubChapter ? 'Subcapitol' : 'Capitol',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    onTap: () {
+                      // Găsim prima pagină din capitol
+                      final pageIndex = _currentBook!.pages.indexWhere(
+                        (page) => page.chapterNumber == chapter.number,
+                      );
 
-    // Filtrăm speech marks pentru această pagină
-    final pageMarks = _speechMarks
-        .where(
-            (mark) => mark.start >= pageStartIndex && mark.start < pageEndIndex)
-        .toList();
-
-    // Sortăm marks după poziție pentru a procesa corect
-    pageMarks.sort((a, b) => a.start.compareTo(b.start));
-
-    for (int i = 0; i < pageMarks.length; i++) {
-      final mark = pageMarks[i];
-      if (mark.type != 'word') continue;
-
-      final localStart = mark.start - pageStartIndex;
-      final localEnd = mark.end - pageStartIndex;
-
-      // Verificăm boundaries
-      if (localStart < 0 ||
-          localEnd > content.length ||
-          localStart >= content.length) {
-        continue;
-      }
-
-      // Text înainte de cuvânt
-      if (localStart > textPointer) {
-        spans.add(TextSpan(text: content.substring(textPointer, localStart)));
-      }
-
-      final markIndexInFull = _speechMarks.indexOf(mark);
-      final isCurrentWord = markIndexInFull == _currentWordIndex;
-
-      // Extragem cuvântul EXACT din conținutul original (nu din mark.value!)
-      final actualWord = content.substring(localStart, localEnd);
-
-      // Facem cuvântul clickable
-      spans.add(
-        TextSpan(
-          text: actualWord, // ✅ Folosim textul original, nu mark.value
-          style: TextStyle(
-            backgroundColor: isCurrentWord
-                ? Colors.yellow.withValues(alpha: 0.6)
-                : Colors.transparent,
-            fontWeight: isCurrentWord ? FontWeight.bold : FontWeight.normal,
-          ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () {
-              debugPrint('👆 Click pe: "$actualWord"');
-              _playFromWord(markIndexInFull);
-            },
+                      if (pageIndex != -1) {
+                        setState(() {
+                          _currentPageIndex = pageIndex;
+                        });
+                        _pageController.jumpToPage(pageIndex);
+                        Navigator.pop(context);
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-      );
-      textPointer = localEnd;
-    }
-
-    // Text rămas după ultimul cuvânt
-    if (textPointer < content.length) {
-      spans.add(TextSpan(text: content.substring(textPointer)));
-    }
-
-    return spans;
+      ),
+    );
   }
 
   @override
@@ -439,22 +384,31 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     _audioPlayer.dispose();
     _positionSubscription?.cancel();
     _pageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: const Color(0xFFFFFDF7),
       appBar: AppBar(
         title: Text(_currentBook?.title ?? 'Sonant Reader'),
         backgroundColor: const Color(0xFF8B4513),
         foregroundColor: Colors.white,
+        leading: _currentBook != null
+            ? IconButton(
+                icon: const Icon(Icons.menu_book),
+                onPressed: _showTableOfContents,
+                tooltip: 'Cuprins',
+              )
+            : null,
         actions: [
           if (_currentBook != null)
             IconButton(
               icon: const Icon(Icons.info_outline),
-              onPressed: () => _showBookInfo(),
+              onPressed: _showBookInfo,
             ),
           IconButton(
             icon: const Icon(Icons.exit_to_app),
@@ -514,8 +468,8 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
       onPageChanged: (index) {
         setState(() {
           _currentPageIndex = index;
+          _currentWordIndex = -1;
         });
-        _preloadNextPage(index);
       },
       itemBuilder: (context, index) {
         final page = _currentBook!.pages[index];
@@ -525,6 +479,11 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
   }
 
   Widget _buildPage(BookPage page) {
+    // Verificăm dacă e început de capitol
+    final isChapterStart = _currentPageIndex == 0 ||
+        _currentBook!.pages[_currentPageIndex - 1].chapterNumber !=
+            page.chapterNumber;
+
     return Center(
       child: Container(
         constraints: const BoxConstraints(maxWidth: 700),
@@ -533,15 +492,17 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
           children: [
             Expanded(
               child: SingleChildScrollView(
+                controller: _scrollController,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Header pagină
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
                           child: Text(
-                            _currentBook!.title,
+                            page.chapterTitle,
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.brown[600],
@@ -574,25 +535,72 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                       ],
                     ),
                     const Divider(height: 24),
-                    RichText(
-                      textAlign: TextAlign.justify,
-                      text: TextSpan(
-                        style: const TextStyle(
-                          fontSize: 18,
-                          height: 1.8,
-                          color: Colors.black87,
-                          fontFamily: 'serif',
-                          letterSpacing: 0.3,
+
+                    // 🎯 Capitol header (dacă e începutul unui capitol)
+                    if (isChapterStart) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Column(
+                          children: [
+                            Text(
+                              page.chapterTitle,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.brown[800],
+                                fontFamily: 'serif',
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 2,
+                              width: 100,
+                              color: Colors.brown[400],
+                            ),
+                          ],
                         ),
-                        children:
-                            _buildTextSpans(page.content, page.startCharIndex),
                       ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // ✨ TEXT CU HIGHLIGHT PERFORMANT
+                    HighlightedText(
+                      text: page.content,
+                      highlights: _wordHighlights,
+                      currentHighlightIndex: _currentWordIndex,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        height: 1.8,
+                        color: Colors.black87,
+                        fontFamily: 'serif',
+                        letterSpacing: 0.3,
+                      ),
+                      textAlign: TextAlign.justify,
+                      onWordTap: (wordIndex) {
+                        // Găsim index-ul global din speech marks
+                        if (wordIndex < _wordHighlights.length) {
+                          final localHighlight = _wordHighlights[wordIndex];
+                          final globalIndex = _speechMarks.indexWhere(
+                            (mark) =>
+                                mark.start - page.startCharIndex ==
+                                localHighlight.start,
+                          );
+                          if (globalIndex != -1) {
+                            _playFromWord(globalIndex);
+                          }
+                        }
+                      },
+                      scrollController: _scrollController,
                     ),
+
                     const SizedBox(height: 40),
                   ],
                 ),
               ),
             ),
+
+            // Progress bar
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -626,7 +634,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: Colors.black.withOpacity(0.1),
             blurRadius: 8,
             offset: const Offset(0, -2),
           ),
@@ -654,19 +662,15 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
               IconButton(
                 icon: const Icon(Icons.chevron_left, size: 32),
                 onPressed: _currentPageIndex > 0
-                    ? () {
-                        _pageController.previousPage(
+                    ? () => _pageController.previousPage(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeInOut,
-                        );
-                      }
+                        )
                     : null,
-                tooltip: 'Pagina anterioară',
               ),
               IconButton(
                 icon: const Icon(Icons.stop, size: 28),
-                onPressed: () => _stopAudio(),
-                tooltip: 'Stop',
+                onPressed: _stopAudio,
               ),
               StreamBuilder<PlayerState>(
                 stream: _audioPlayer.playerStateStream,
@@ -697,26 +701,21 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                         }
                       }
                     },
-                    tooltip: isPlaying ? 'Pauză' : 'Redare',
                   );
                 },
               ),
               IconButton(
                 icon: const Icon(Icons.library_books, size: 28),
                 onPressed: _isLoadingAudio ? null : _playCurrentPage,
-                tooltip: 'Citește pagina curentă',
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right, size: 32),
                 onPressed: _currentPageIndex < _currentBook!.pages.length - 1
-                    ? () {
-                        _pageController.nextPage(
+                    ? () => _pageController.nextPage(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeInOut,
-                        );
-                      }
+                        )
                     : null,
-                tooltip: 'Pagina următoare',
               ),
             ],
           ),
@@ -745,19 +744,8 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
                   ],
                   onChanged: (value) {
                     if (value != null) {
-                      setState(() {
-                        _selectedVoice = value;
-                      });
-                      if (_speechMarks.isNotEmpty) {
-                        _stopAudio();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                'Voce schimbată la $value. Apasă Play pentru noua voce.'),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      }
+                      setState(() => _selectedVoice = value);
+                      _audioCache.clear();
                     }
                   },
                 ),
@@ -783,6 +771,8 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
             Text('Autor: ${_currentBook!.author}'),
             const SizedBox(height: 8),
             Text('Format: ${_currentBook!.format.name.toUpperCase()}'),
+            const SizedBox(height: 8),
+            Text('Capitole: ${_currentBook!.chapters.length}'),
             const SizedBox(height: 8),
             Text('Total pagini: ${_currentBook!.pages.length}'),
             const SizedBox(height: 8),
