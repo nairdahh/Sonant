@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "114372126413",
+    "project_id": "sonant-c81f1",
+    "storage_bucket": "sonant-c81f1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:114372126413:android:90850ae22b63e290972b84",
+        "android_client_info": {
+          "package_name": "com.example.sonant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArIpw3KyH8BBZ-QTjJrPvXnUcomycJUjU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
