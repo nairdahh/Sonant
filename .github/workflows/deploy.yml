@@ -2,7 +2,7 @@ name: Deploy Flutter Web to GitHub Pages
 
 on:
   push:
-    branches: [ main ] # Se activează la orice push pe ramura 'main'
+    branches: [ main ]
 
 jobs:
   build_and_deploy:
@@ -14,13 +14,35 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # Folosește versiunea stabilă de Flutter
+          channel: 'stable'
+
+      - name: Create .env file
+        run: |
+          # Cream directorul assets daca nu exista
+          mkdir -p assets
+          # Cream fisierul direct in locatia corecta
+          echo "PROJECT_ID=${{ secrets.PROJECT_ID }}" > assets/.env
+          echo "MESSAGING_SENDER_ID=${{ secrets.MESSAGING_SENDER_ID }}" >> assets/.env
+          echo "STORAGE_BUCKET=${{ secrets.STORAGE_BUCKET }}" >> assets/.env
+          echo "WEB_API_KEY=${{ secrets.WEB_API_KEY }}" >> assets/.env
+          echo "WEB_APP_ID=${{ secrets.WEB_APP_ID }}" >> assets/.env
+          echo "WEB_AUTH_DOMAIN=${{ secrets.WEB_AUTH_DOMAIN }}" >> assets/.env
+          echo "WEB_MEASUREMENT_ID=${{ secrets.WEB_MEASUREMENT_ID }}" >> assets/.env
+          echo "ANDROID_API_KEY=${{ secrets.ANDROID_API_KEY }}" >> assets/.env
+          echo "ANDROID_APP_ID=${{ secrets.ANDROID_APP_ID }}" >> assets/.env
+          echo "IOS_API_KEY=${{ secrets.IOS_API_KEY }}" >> assets/.env
+          echo "IOS_APP_ID=${{ secrets.IOS_APP_ID }}" >> assets/.env
+          echo "IOS_BUNDLE_ID=${{ secrets.IOS_BUNDLE_ID }}" >> assets/.env
+          echo "WINDOWS_API_KEY=${{ secrets.WINDOWS_API_KEY }}" >> assets/.env
+          echo "WINDOWS_APP_ID=${{ secrets.WINDOWS_APP_ID }}" >> assets/.env
+          echo "WINDOWS_AUTH_DOMAIN=${{ secrets.WINDOWS_AUTH_DOMAIN }}" >> assets/.env
+          echo "WINDOWS_MEASUREMENT_ID=${{ secrets.WINDOWS_MEASUREMENT_ID }}" >> assets/.env
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build web app
-        run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+        run: flutter build web --release
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
