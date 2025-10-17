@@ -80,7 +80,6 @@ jobs:
           echo "🎉 Deployment successful!"
           echo ""
           echo "🔗 Your app is live at:"
-          echo "   https://${{ secrets.FIREBASE_PROJECT_ID }}.web.app"
+          echo "   https://sonant.nairdah.me"  # ✅ Domeniul tău custom
+          echo "   https://sonant-c81f1.web.app"
           echo ""
-          echo "⚙️  Functions dashboard:"
-          echo "   https://console.firebase.google.com/project/${{ secrets.FIREBASE_PROJECT_ID }}/functions"

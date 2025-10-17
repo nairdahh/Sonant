@@ -1,23 +1,24 @@
-// functions/src/index.ts - Firebase Functions v2 API cu dotenv
+// functions/src/index.ts - Firebase Functions v2 with Environment Variables
 import * as dotenv from "dotenv";
-
-// ✅ Încarcă .env pentru emulator
-if (process.env.FUNCTIONS_EMULATOR === "true") {
-  dotenv.config();
-  console.log("🔧 Loaded .env for emulator");
-}
-
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import {
   PollyClient,
   SynthesizeSpeechCommand,
+  DescribeVoicesCommand,
   OutputFormat,
   Engine,
   VoiceId,
   TextType,
 } from "@aws-sdk/client-polly";
+import { Readable } from "stream";
+
+// ✅ Încarcă .env DOAR pentru emulator
+if (process.env.FUNCTIONS_EMULATOR === "true") {
+  dotenv.config();
+  console.log("🔧 Loaded .env for emulator");
+}
 
 // Setări globale pentru toate Functions
 setGlobalOptions({
@@ -25,16 +26,37 @@ setGlobalOptions({
   timeoutSeconds: 300,
   memory: "512MiB",
   region: "us-central1",
-  // Note: CORS se setează per-function în onCall options
 });
 
 // Inițializare Firebase Admin
 admin.initializeApp();
 
-// AWS Polly Client
-const getPollyClient = () => {
-  // Pentru emulator, folosim .env
-  // Pentru production, folosim Firebase Secrets (automat în process.env)
+// Helper: Convert stream to string
+const streamToString = async (stream: any): Promise<string> => {
+  const chunks: Uint8Array[] = [];
+  const readable = Readable.from(stream);
+
+  for await (const chunk of readable) {
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+};
+
+// Helper: Convert stream to Buffer
+const streamToBuffer = async (stream: any): Promise<Buffer> => {
+  const chunks: Uint8Array[] = [];
+  const readable = Readable.from(stream);
+
+  for await (const chunk of readable) {
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks);
+};
+
+// AWS Polly Client Factory
+const getPollyClient = (): PollyClient => {
   const config = process.env;
 
   console.log("🔍 AWS Config Check:");
@@ -78,6 +100,7 @@ export const synthesizeSpeech = onCall(
       /http:\/\/127\.0\.0\.1(:\d+)?/,
       "https://sonant-c81f1.web.app",
       "https://sonant-c81f1.firebaseapp.com",
+      "https://sonant.nairdah.me", // ✅ Domeniul tău custom
     ],
   },
   async (request) => {
@@ -127,13 +150,13 @@ export const synthesizeSpeech = onCall(
         speechMarksResponse.AudioStream
       );
       const speechMarks = speechMarksData
+        .trim()
         .split("\n")
-        .filter((line) => line.trim())
         .map((line) => JSON.parse(line));
 
-      console.log(`   ✅ Speech marks: ${speechMarks.length} words`);
+      console.log(`   ✅ Generated ${speechMarks.length} speech marks`);
 
-      // 🎵 Step 2: Generare Audio MP3
+      // 🎵 Step 2: Generare Audio (MP3)
       const audioCommand = new SynthesizeSpeechCommand({
         Text: text,
         OutputFormat: OutputFormat.MP3,
@@ -144,28 +167,22 @@ export const synthesizeSpeech = onCall(
 
       const audioResponse = await pollyClient.send(audioCommand);
 
-      // Convertim stream în Base64
+      // Convertim stream în Buffer
       const audioBuffer = await streamToBuffer(audioResponse.AudioStream);
       const audioBase64 = audioBuffer.toString("base64");
 
-      console.log(`   ✅ Audio generated: ${audioBuffer.length} bytes`);
+      console.log(`   ✅ Generated audio: ${audioBuffer.length} bytes`);
 
-      // 📊 Log usage pentru monitoring
-      //  await admin.firestore().collection("usage_logs").add({
-      //    userId: request.auth.uid,
-      //    action: "synthesize_speech",
-      //    textLength: text.length,
-      //    voiceId,
-      //    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      //  });
-
+      // ✅ Return rezultat
       return {
-        audioUrl: `data:audio/mpeg;base64,${audioBase64}`,
-        speechMarks,
-        duration: audioResponse.RequestCharacters,
+        success: true,
+        audioBase64: audioBase64,
+        speechMarks: speechMarks,
+        voiceId: voiceId,
+        engine: engine,
       };
     } catch (error: any) {
-      console.error("❌ Polly error:", error);
+      console.error("❌ Error synthesizing speech:", error);
       throw new HttpsError(
         "internal",
         `Failed to synthesize speech: ${error.message}`
@@ -182,37 +199,34 @@ export const listVoices = onCall(
       /http:\/\/127\.0\.0\.1(:\d+)?/,
       "https://sonant-c81f1.web.app",
       "https://sonant-c81f1.firebaseapp.com",
+      "https://sonant.nairdah.me", // ✅ Domeniul tău custom
     ],
   },
   async (request) => {
+    // ✅ Verificare autentificare
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "User must be authenticated");
     }
 
     try {
-      // Lista statică de voci (pentru a evita apeluri inutile la AWS)
-      const voices = [
-        { id: "Joanna", language: "en-US", gender: "Female", engine: "neural" },
-        { id: "Matthew", language: "en-US", gender: "Male", engine: "neural" },
-        { id: "Ivy", language: "en-US", gender: "Female", engine: "neural" },
-        { id: "Justin", language: "en-US", gender: "Male", engine: "neural" },
-        { id: "Kendra", language: "en-US", gender: "Female", engine: "neural" },
-        {
-          id: "Kimberly",
-          language: "en-US",
-          gender: "Female",
-          engine: "neural",
-        },
-        { id: "Salli", language: "en-US", gender: "Female", engine: "neural" },
-        { id: "Joey", language: "en-US", gender: "Male", engine: "neural" },
-        { id: "Amy", language: "en-GB", gender: "Female", engine: "neural" },
-        { id: "Emma", language: "en-GB", gender: "Female", engine: "neural" },
-        { id: "Brian", language: "en-GB", gender: "Male", engine: "neural" },
-      ];
+      const pollyClient = getPollyClient();
 
-      return { voices };
+      console.log(`🎤 Listing voices for user ${request.auth.uid}`);
+
+      const command = new DescribeVoicesCommand({
+        Engine: "neural",
+      });
+
+      const response = await pollyClient.send(command);
+
+      console.log(`   ✅ Found ${response.Voices?.length || 0} voices`);
+
+      return {
+        success: true,
+        voices: response.Voices || [],
+      };
     } catch (error: any) {
-      console.error("❌ List voices error:", error);
+      console.error("❌ Error listing voices:", error);
       throw new HttpsError(
         "internal",
         `Failed to list voices: ${error.message}`
@@ -220,23 +234,3 @@ export const listVoices = onCall(
     }
   }
 );
-
-// 🛠️ Helper: Stream to String
-async function streamToString(stream: any): Promise<string> {
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-  });
-}
-
-// 🛠️ Helper: Stream to Buffer
-async function streamToBuffer(stream: any): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-  });
-}
