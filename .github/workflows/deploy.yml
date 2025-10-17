@@ -46,6 +46,9 @@ jobs:
 
       - name: Build web app
         run: flutter build web --release
+        
+      - name: Remove .env from build output
+        run: rm build/web/assets/assets/.env
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
