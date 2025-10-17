@@ -13,9 +13,12 @@ dependencies:
   # AWS Polly pentru text-to-speech
   aws_polly_api: ^2.0.0
 
-  # Firebase pentru autentificare
-  firebase_core: ^3.0.0
-  firebase_auth: ^5.0.0
+  # Firebase pentru autentificare și storage
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.4
+  http: ^1.1.0
 
   # Audio player
   just_audio: ^0.9.40
@@ -31,6 +34,9 @@ dependencies:
 
   # PDF parser
   syncfusion_flutter_pdf: ^27.1.48
+
+  # UUID pentru ID-uri unice
+  uuid: ^4.0.0
 
 dev_dependencies:
   flutter_test:
