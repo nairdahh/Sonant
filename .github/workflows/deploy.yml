@@ -22,26 +22,7 @@ jobs:
         run: flutter pub get
 
       - name: Build web app with secrets
-        run: flutter build web --release \
-          --dart-define=PROJECT_ID=${{ secrets.PROJECT_ID }} \
-          --dart-define=MESSAGING_SENDER_ID=${{ secrets.MESSAGING_SENDER_ID }} \
-          --dart-define=STORAGE_BUCKET=${{ secrets.STORAGE_BUCKET }} \
-          --dart-define=WEB_API_KEY=${{ secrets.WEB_API_KEY }} \
-          --dart-define=WEB_APP_ID=${{ secrets.WEB_APP_ID }} \
-          --dart-define=WEB_AUTH_DOMAIN=${{ secrets.WEB_AUTH_DOMAIN }} \
-          --dart-define=WEB_MEASUREMENT_ID=${{ secrets.WEB_MEASUREMENT_ID }} \
-          --dart-define=ANDROID_API_KEY=${{ secrets.ANDROID_API_KEY }} \
-          --dart-define=ANDROID_APP_ID=${{ secrets.ANDROID_APP_ID }} \
-          --dart-define=IOS_API_KEY=${{ secrets.IOS_API_KEY }} \
-          --dart-define=IOS_APP_ID=${{ secrets.IOS_APP_ID }} \
-          --dart-define=IOS_BUNDLE_ID=${{ secrets.IOS_BUNDLE_ID }} \
-          --dart-define=WINDOWS_API_KEY=${{ secrets.WINDOWS_API_KEY }} \
-          --dart-define=WINDOWS_APP_ID=${{ secrets.WINDOWS_APP_ID }} \
-          --dart-define=WINDOWS_AUTH_DOMAIN=${{ secrets.WINDOWS_AUTH_DOMAIN }} \
-          --dart-define=WINDOWS_MEASUREMENT_ID=${{ secrets.WINDOWS_MEASUREMENT_ID }} \
-          --dart-define=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
-          --dart-define=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-          --dart-define=AWS_REGION=${{ secrets.AWS_REGION }}
+        run: flutter build web --release --dart-define=PROJECT_ID=${{ secrets.PROJECT_ID }} --dart-define=MESSAGING_SENDER_ID=${{ secrets.MESSAGING_SENDER_ID }} --dart-define=STORAGE_BUCKET=${{ secrets.STORAGE_BUCKET }} --dart-define=WEB_API_KEY=${{ secrets.WEB_API_KEY }} --dart-define=WEB_APP_ID=${{ secrets.WEB_APP_ID }} --dart-define=WEB_AUTH_DOMAIN=${{ secrets.WEB_AUTH_DOMAIN }} --dart-define=WEB_MEASUREMENT_ID=${{ secrets.WEB_MEASUREMENT_ID }} --dart-define=ANDROID_API_KEY=${{ secrets.ANDROID_API_KEY }} --dart-define=ANDROID_APP_ID=${{ secrets.ANDROID_APP_ID }} --dart-define=IOS_API_KEY=${{ secrets.IOS_API_KEY }} --dart-define=IOS_APP_ID=${{ secrets.IOS_APP_ID }} --dart-define=IOS_BUNDLE_ID=${{ secrets.IOS_BUNDLE_ID }} --dart-define=WINDOWS_API_KEY=${{ secrets.WINDOWS_API_KEY }} --dart-define=WINDOWS_APP_ID=${{ secrets.WINDOWS_APP_ID }} --dart-define=WINDOWS_AUTH_DOMAIN=${{ secrets.WINDOWS_AUTH_DOMAIN }} --dart-define=WINDOWS_MEASUREMENT_ID=${{ secrets.WINDOWS_MEASUREMENT_ID }} --dart-define=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} --dart-define=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} --dart-define=AWS_REGION=${{ secrets.AWS_REGION }}
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
