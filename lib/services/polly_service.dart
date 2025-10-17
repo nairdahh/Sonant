@@ -1,257 +1,171 @@
-// lib/services/polly_service.dart
+// lib/services/polly_service.dart - CLIENT pentru Firebase Cloud Functions
 
-import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-// STERGE: import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:just_audio/just_audio.dart';
 import '../models/polly_response.dart';
-import 'package:aws_polly_api/polly-2016-06-10.dart';
 
 class PollyService {
-  // MODIFICAT: Citim direct din variabilele de compilare
-  static const String _accessKey = String.fromEnvironment('AWS_ACCESS_KEY_ID');
-  static const String _secretKey =
-      String.fromEnvironment('AWS_SECRET_ACCESS_KEY');
-  static const String _region = String.fromEnvironment('AWS_REGION');
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
-  // AWS Polly are o limită de 3000 caractere per request
-  static const int maxCharsPerRequest = 2900;
+  // Pentru development local cu emulator
+  PollyService() {
+    if (kDebugMode) {
+      // ✅ ACTIVAT pentru development local
+      // try {
+      //  _functions.useFunctionsEmulator('localhost', 5001);
+      //  debugPrint('🔧 Using Firebase Functions Emulator on localhost:5001');
+      // } catch (e) {
+      //  debugPrint('⚠️ Could not connect to emulator: $e');
+      //  debugPrint('   Make sure to run: firebase emulators:start');
+      // }
+    }
+  }
 
-  // Metoda optimizată pentru texte lungi (cărți)
+  /// Sintetizează speech folosind Firebase Cloud Function
+  /// 🔒 AWS credentials rămân SIGURE pe server!
   Future<PollyResponse?> synthesizeSpeech(
     String text, {
     String voiceId = 'Joanna',
+    String engine = 'neural',
     Function(double)? onProgress,
   }) async {
-    // MODIFICAT: Verificăm dacă cheile sunt goale, nu nule
-    if (_accessKey == null ||
-        _accessKey.isEmpty ||
-        _secretKey == null ||
-        _secretKey.isEmpty ||
-        _region == null ||
-        _region.isEmpty) {
-      debugPrint(
-          'EROARE CRITICĂ: Cheile AWS nu au fost injectate la build time!');
-      return null;
-    }
-
     try {
-      // Dacă textul e prea lung pentru AWS Polly (>3000), îl trunChiem
+      // ✅ Verifică autentificarea
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('❌ User not authenticated');
+        return null;
+      }
+
+      debugPrint('🎵 Calling Cloud Function: synthesizeSpeech');
+      debugPrint('   Text length: ${text.length} chars');
+      debugPrint('   Voice: $voiceId');
+
+      // Limitare text (AWS Polly max 3000 chars)
       String textToSynthesize = text;
-      if (text.length > maxCharsPerRequest) {
-        debugPrint(
-            '⚠️ Text prea lung (${text.length} caractere), trunChiem la $maxCharsPerRequest');
-        textToSynthesize = text.substring(0, maxCharsPerRequest);
+      if (text.length > 2900) {
+        debugPrint('⚠️ Text truncated: ${text.length} → 2900 chars');
+        textToSynthesize = text.substring(0, 2900);
       }
 
-      // Procesăm direct, fără împărțire
-      return await _synthesizeShortText(textToSynthesize, voiceId);
+      // 📞 Apelează Cloud Function
+      final callable = _functions.httpsCallable(
+        'synthesizeSpeech',
+        options: HttpsCallableOptions(
+          timeout: const Duration(minutes: 5), // Pentru texte lungi
+        ),
+      );
+
+      final result = await callable.call<Map<String, dynamic>>({
+        'text': textToSynthesize,
+        'voiceId': voiceId,
+        'engine': engine,
+      });
+
+      if (result.data == null) {
+        debugPrint('❌ Cloud Function returned null');
+        return null;
+      }
+
+      final data = result.data!;
+
+      // Parse response
+      final audioUrl = data['audioUrl'] as String?;
+      final speechMarksData = data['speechMarks'] as List<dynamic>?;
+
+      if (audioUrl == null || speechMarksData == null) {
+        debugPrint('❌ Invalid response from Cloud Function');
+        return null;
+      }
+
+      // Convertim speech marks
+      final speechMarks = speechMarksData
+          .map((mark) => SpeechMark.fromJson(mark as Map<String, dynamic>))
+          .toList();
+
+      debugPrint('✅ Audio received: ${audioUrl.length} chars (base64)');
+      debugPrint('✅ Speech marks: ${speechMarks.length} words');
+
+      return PollyResponse(
+        audioUrl: audioUrl,
+        speechMarks: speechMarks,
+      );
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('❌ Firebase Functions error:');
+      debugPrint('   Code: ${e.code}');
+      debugPrint('   Message: ${e.message}');
+      debugPrint('   Details: ${e.details}');
+
+      // Erori user-friendly
+      String userMessage;
+      switch (e.code) {
+        case 'unauthenticated':
+          userMessage =
+              'Trebuie să fii autentificat pentru a folosi text-to-speech';
+          break;
+        case 'invalid-argument':
+          userMessage = 'Text invalid sau prea lung (max 3000 caractere)';
+          break;
+        case 'resource-exhausted':
+          userMessage = 'Limită de utilizare atinsă. Încearcă mai târziu';
+          break;
+        default:
+          userMessage = 'Eroare la generarea audio: ${e.message}';
+      }
+
+      // Aici poți afișa un SnackBar sau Dialog
+      debugPrint('💬 User message: $userMessage');
+
+      return null;
     } catch (e) {
-      debugPrint('Eroare în PollyService: $e');
+      debugPrint('❌ Unexpected error: $e');
       return null;
     }
   }
 
-  // Sintetizare pentru texte scurte
-  Future<PollyResponse?> _synthesizeShortText(
-      String text, String voiceId) async {
-    final client = Polly(
-      region: _region!,
-      credentials: AwsClientCredentials(
-        accessKey: _accessKey!,
-        secretKey: _secretKey!,
-      ),
-    );
-
-    final voice = _getVoiceIdFromString(voiceId);
-    final engine = _getEngineForVoice(voiceId);
-
-    // Obținem Speech Marks
-    debugPrint("--> Cerere pentru Speech Marks...");
-    final speechMarksResponse = await client.synthesizeSpeech(
-      outputFormat: OutputFormat.json,
-      text: text,
-      voiceId: voice,
-      engine: engine,
-      speechMarkTypes: [SpeechMarkType.word],
-    );
-
-    List<SpeechMark> speechMarks = [];
-    if (speechMarksResponse.audioStream != null) {
-      final bytes = speechMarksResponse.audioStream!;
-      final responseBody = utf8.decode(bytes);
-      final lines = responseBody.split('\n').where((line) => line.isNotEmpty);
-      speechMarks =
-          lines.map((line) => SpeechMark.fromJson(json.decode(line))).toList();
-    }
-    debugPrint("--> Speech Marks primite: ${speechMarks.length} cuvinte.");
-
-    // Obținem audio
-    debugPrint("--> Cerere pentru Audio MP3...");
-    final audioResponse = await client.synthesizeSpeech(
-      outputFormat: OutputFormat.mp3,
-      text: text,
-      voiceId: voice,
-      engine: engine,
-    );
-
-    String? audioUrl;
-    if (audioResponse.audioStream != null) {
-      final audioBytes = audioResponse.audioStream!;
-      final base64Audio = base64Encode(audioBytes);
-      audioUrl = 'data:audio/mpeg;base64,$base64Audio';
-    }
-    debugPrint("--> Audio MP3 primit și codat.");
-
-    client.close();
-    return PollyResponse(audioUrl: audioUrl, speechMarks: speechMarks);
-  }
-
-  // Sintetizare pentru texte lungi (împărțim în bucăți)
-  Future<PollyResponse?> _synthesizeLongText(
-    String text,
-    String voiceId,
-    Function(double)? onProgress,
-  ) async {
-    debugPrint(
-        "--> Text lung detectat (${text.length} caractere), împărțim în bucăți...");
-
-    final chunks = _splitTextIntoChunks(text, maxCharsPerRequest);
-    debugPrint("--> Text împărțit în ${chunks.length} bucăți");
-
-    List<SpeechMark> allSpeechMarks = [];
-    List<Uint8List> allAudioBytes = [];
-    int totalTimeOffset = 0;
-    int totalCharOffset = 0;
-
-    final tempPlayer = AudioPlayer();
-
+  /// Obține lista vocilor disponibile
+  Future<List<VoiceInfo>?> listVoices() async {
     try {
-      for (int i = 0; i < chunks.length; i++) {
-        if (onProgress != null) {
-          onProgress((i + 1) / chunks.length);
-        }
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
 
-        debugPrint("--> Procesăm bucata ${i + 1}/${chunks.length}...");
+      final callable = _functions.httpsCallable('listVoices');
+      final result = await callable.call<Map<String, dynamic>>();
 
-        final chunkResponse = await _synthesizeShortText(chunks[i], voiceId);
+      if (result.data == null) return null;
 
-        if (chunkResponse == null) {
-          debugPrint("Eroare la procesarea bucății $i");
-          continue;
-        }
-
-        int realDuration = 0;
-        if (chunkResponse.audioUrl != null) {
-          try {
-            await tempPlayer.setUrl(chunkResponse.audioUrl!);
-            realDuration = tempPlayer.duration?.inMilliseconds ?? 0;
-            debugPrint("   Durată reală audio: ${realDuration}ms");
-          } catch (e) {
-            debugPrint("   Eroare la citirea duratei: $e");
-            final wordsInChunk = chunks[i].split(' ').length;
-            realDuration = (wordsInChunk / 2.5 * 1000).round();
-          }
-        }
-
-        for (var mark in chunkResponse.speechMarks) {
-          allSpeechMarks.add(SpeechMark(
-            time: mark.time + totalTimeOffset,
-            type: mark.type,
-            start: mark.start + totalCharOffset,
-            end: mark.end + totalCharOffset,
-            value: mark.value,
-          ));
-        }
-
-        if (chunkResponse.audioUrl != null) {
-          final base64Data = chunkResponse.audioUrl!.split(',')[1];
-          final audioBytes = base64Decode(base64Data);
-          allAudioBytes.add(audioBytes);
-        }
-
-        totalTimeOffset += realDuration;
-        totalCharOffset += chunks[i].length;
-
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-    } finally {
-      await tempPlayer.dispose();
+      final voicesData = result.data!['voices'] as List<dynamic>;
+      return voicesData
+          .map((v) => VoiceInfo.fromJson(v as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ Error listing voices: $e');
+      return null;
     }
-
-    final combinedAudioBytes = allAudioBytes.expand((x) => x).toList();
-    final base64Audio = base64Encode(combinedAudioBytes);
-    final audioUrl = 'data:audio/mpeg;base64,$base64Audio';
-
-    debugPrint(
-        "--> Procesare completă: ${allSpeechMarks.length} cuvinte totale");
-    debugPrint(
-        "--> Durată totală audio: ${totalTimeOffset}ms (${(totalTimeOffset / 1000 / 60).toStringAsFixed(1)} minute)");
-
-    return PollyResponse(audioUrl: audioUrl, speechMarks: allSpeechMarks);
   }
+}
 
-  // Împarte textul în bucăți la granițe de propoziții
-  List<String> _splitTextIntoChunks(String text, int maxLength) {
-    List<String> chunks = [];
-    List<String> sentences = text.split(RegExp(r'[.!?]\s+'));
+// Model pentru informații voce
+class VoiceInfo {
+  final String id;
+  final String language;
+  final String gender;
+  final String engine;
 
-    String currentChunk = '';
-    for (var sentence in sentences) {
-      if (currentChunk.length + sentence.length > maxLength &&
-          currentChunk.isNotEmpty) {
-        chunks.add(currentChunk.trim());
-        currentChunk = '$sentence. ';
-      } else {
-        currentChunk += '$sentence. ';
-      }
-    }
+  VoiceInfo({
+    required this.id,
+    required this.language,
+    required this.gender,
+    required this.engine,
+  });
 
-    if (currentChunk.isNotEmpty) {
-      chunks.add(currentChunk.trim());
-    }
-
-    return chunks;
-  }
-
-  Engine? _getEngineForVoice(String voiceIdString) {
-    final neuralVoices = [
-      'Joanna',
-      'Ivy',
-      'Justin',
-      'Kendra',
-      'Kimberly',
-      'Salli',
-      'Joey',
-      'Matthew',
-      'Amy',
-      'Emma',
-      'Brian'
-    ];
-
-    return neuralVoices.contains(voiceIdString)
-        ? Engine.neural
-        : Engine.standard;
-  }
-
-  VoiceId _getVoiceIdFromString(String voiceIdString) {
-    final voiceMap = {
-      'Joanna': VoiceId.joanna,
-      'Matthew': VoiceId.matthew,
-      'Ivy': VoiceId.ivy,
-      'Justin': VoiceId.justin,
-      'Kendra': VoiceId.kendra,
-      'Kimberly': VoiceId.kimberly,
-      'Salli': VoiceId.salli,
-      'Joey': VoiceId.joey,
-      'Amy': VoiceId.amy,
-      'Emma': VoiceId.emma,
-      'Brian': VoiceId.brian,
-      'Geraint': VoiceId.geraint,
-      'Nicole': VoiceId.nicole,
-      'Russell': VoiceId.russell,
-    };
-
-    return voiceMap[voiceIdString] ?? VoiceId.joanna;
+  factory VoiceInfo.fromJson(Map<String, dynamic> json) {
+    return VoiceInfo(
+      id: json['id'] as String,
+      language: json['language'] as String,
+      gender: json['gender'] as String,
+      engine: json['engine'] as String,
+    );
   }
 }

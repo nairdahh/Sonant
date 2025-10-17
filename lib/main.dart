@@ -1,16 +1,16 @@
-// lib/main.dart - ACTUALIZAT
+// lib/main.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/auth_screen.dart';
-import 'screens/library_screen.dart'; // ✅ Schimbat
+import 'screens/library_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inițializează Firebase
+  // Firebase se inițializează cu String.fromEnvironment
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MyApp());
@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (ctx, userSnapshot) {
           if (userSnapshot.hasData) {
-            return const LibraryScreen(); // ✅ Schimbat la Library
+            return const LibraryScreen();
           }
           return const AuthScreen();
         },
