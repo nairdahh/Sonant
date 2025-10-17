@@ -37,6 +37,9 @@ jobs:
           echo "WINDOWS_APP_ID=${{ secrets.WINDOWS_APP_ID }}" >> assets/.env
           echo "WINDOWS_AUTH_DOMAIN=${{ secrets.WINDOWS_AUTH_DOMAIN }}" >> assets/.env
           echo "WINDOWS_MEASUREMENT_ID=${{ secrets.WINDOWS_MEASUREMENT_ID }}" >> assets/.env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> assets/.env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> assets/.env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> assets/.env
 
       - name: Install dependencies
         run: flutter pub get
