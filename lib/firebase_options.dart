@@ -5,7 +5,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
-
     // Common values from .env
     final projectId = dotenv.env['PROJECT_ID']!;
     final messagingSenderId = dotenv.env['MESSAGING_SENDER_ID']!;
@@ -64,7 +63,7 @@ class DefaultFirebaseOptions {
         storageBucket: dotenv.env['STORAGE_BUCKET']!,
         measurementId: dotenv.env['WEB_MEASUREMENT_ID']!,
       );
-  
+
   static FirebaseOptions get windows => FirebaseOptions(
         apiKey: dotenv.env['WINDOWS_API_KEY']!,
         appId: dotenv.env['WINDOWS_APP_ID']!,
