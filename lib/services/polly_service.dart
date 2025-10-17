@@ -2,15 +2,17 @@
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:just_audio/just_audio.dart'; // ✅ Import pentru AudioPlayer
+// STERGE: import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:just_audio/just_audio.dart';
 import '../models/polly_response.dart';
 import 'package:aws_polly_api/polly-2016-06-10.dart';
 
 class PollyService {
-  final String? _accessKey = dotenv.env['AWS_ACCESS_KEY_ID'];
-  final String? _secretKey = dotenv.env['AWS_SECRET_ACCESS_KEY'];
-  final String? _region = dotenv.env['AWS_REGION'];
+  // MODIFICAT: Citim direct din variabilele de compilare
+  static const String _accessKey = String.fromEnvironment('AWS_ACCESS_KEY_ID');
+  static const String _secretKey =
+      String.fromEnvironment('AWS_SECRET_ACCESS_KEY');
+  static const String _region = String.fromEnvironment('AWS_REGION');
 
   // AWS Polly are o limită de 3000 caractere per request
   static const int maxCharsPerRequest = 2900;
@@ -21,13 +23,19 @@ class PollyService {
     String voiceId = 'Joanna',
     Function(double)? onProgress,
   }) async {
-    if (_accessKey == null || _secretKey == null || _region == null) {
-      debugPrint('EROARE CRITICĂ: Cheile AWS nu s-au încărcat din .env!');
+    // MODIFICAT: Verificăm dacă cheile sunt goale, nu nule
+    if (_accessKey == null ||
+        _accessKey.isEmpty ||
+        _secretKey == null ||
+        _secretKey.isEmpty ||
+        _region == null ||
+        _region.isEmpty) {
+      debugPrint(
+          'EROARE CRITICĂ: Cheile AWS nu au fost injectate la build time!');
       return null;
     }
 
     try {
-      // ❌ NU mai împărțim textul - generăm direct
       // Dacă textul e prea lung pentru AWS Polly (>3000), îl trunChiem
       String textToSynthesize = text;
       if (text.length > maxCharsPerRequest) {
@@ -108,7 +116,6 @@ class PollyService {
     debugPrint(
         "--> Text lung detectat (${text.length} caractere), împărțim în bucăți...");
 
-    // Împărțim textul în bucăți la granițe de propoziții
     final chunks = _splitTextIntoChunks(text, maxCharsPerRequest);
     debugPrint("--> Text împărțit în ${chunks.length} bucăți");
 
@@ -117,7 +124,6 @@ class PollyService {
     int totalTimeOffset = 0;
     int totalCharOffset = 0;
 
-    // Creăm un AudioPlayer temporar pentru a măsura duratele reale
     final tempPlayer = AudioPlayer();
 
     try {
@@ -135,23 +141,19 @@ class PollyService {
           continue;
         }
 
-        // Obținem durata REALĂ a audio-ului generat
         int realDuration = 0;
         if (chunkResponse.audioUrl != null) {
           try {
-            // Încărcăm audio-ul temporar pentru a citi durata
             await tempPlayer.setUrl(chunkResponse.audioUrl!);
             realDuration = tempPlayer.duration?.inMilliseconds ?? 0;
             debugPrint("   Durată reală audio: ${realDuration}ms");
           } catch (e) {
             debugPrint("   Eroare la citirea duratei: $e");
-            // Fallback la estimare dacă citirea duratei eșuează
             final wordsInChunk = chunks[i].split(' ').length;
             realDuration = (wordsInChunk / 2.5 * 1000).round();
           }
         }
 
-        // Adăugăm speech marks cu offset-ul REAL de timp
         for (var mark in chunkResponse.speechMarks) {
           allSpeechMarks.add(SpeechMark(
             time: mark.time + totalTimeOffset,
@@ -162,26 +164,21 @@ class PollyService {
           ));
         }
 
-        // Decodăm audio-ul și îl adăugăm
         if (chunkResponse.audioUrl != null) {
           final base64Data = chunkResponse.audioUrl!.split(',')[1];
           final audioBytes = base64Decode(base64Data);
           allAudioBytes.add(audioBytes);
         }
 
-        // Actualizăm offset-urile cu valorile REALE
         totalTimeOffset += realDuration;
         totalCharOffset += chunks[i].length;
 
-        // Pauză între requests pentru a evita rate limiting
         await Future.delayed(const Duration(milliseconds: 100));
       }
     } finally {
-      // Curățăm player-ul temporar
       await tempPlayer.dispose();
     }
 
-    // Combinăm toate audio-urile
     final combinedAudioBytes = allAudioBytes.expand((x) => x).toList();
     final base64Audio = base64Encode(combinedAudioBytes);
     final audioUrl = 'data:audio/mpeg;base64,$base64Audio';
