@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/saved_book.dart';
-import '../services/firestore_service.dart'; // ✅ Înapoi la Firestore
+import '../models/user_profile.dart';
+import '../services/firestore_service.dart';
+import '../services/user_service.dart';
 import '../services/advanced_book_parser_service.dart';
 import 'updated_book_reader_screen.dart';
 
@@ -16,8 +18,8 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  final FirestoreService _firestoreService =
-      FirestoreService(); // ✅ Înapoi la Firestore
+  final FirestoreService _firestoreService = FirestoreService();
+  final UserService _userService = UserService();
   final AdvancedBookParser _bookParser = AdvancedBookParser();
   bool _isUploading = false;
   double _uploadProgress = 0.0;
@@ -29,13 +31,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _testFirestore() async {
     debugPrint('');
-    debugPrint('═══════════════════════════════════════');
+    debugPrint('╔═══════════════════════════════════════╗');
     debugPrint('🧪 TESTARE FIRESTORE CONNECTION');
-    debugPrint('═══════════════════════════════════════');
+    debugPrint('╚═══════════════════════════════════════╝');
 
     final isConnected = await _firestoreService.testFirestoreConnection();
 
-    debugPrint('═══════════════════════════════════════');
+    debugPrint('╚═══════════════════════════════════════╝');
 
     if (!mounted) return;
 
@@ -144,10 +146,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  /// Extrage prima imagine din carte pentru copertă
   dynamic _extractCoverImage(dynamic parsedBook) {
     try {
-      // Căutăm prima imagine în capitole
       for (final chapter in parsedBook.chapters) {
         for (final element in chapter.elements) {
           if (element.type.toString().contains('image') &&
@@ -245,6 +245,99 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // ✅ NOU: Meniu User
+  Widget _buildUserMenu(UserProfile? profile) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.account_circle, color: Colors.white),
+      offset: const Offset(0, 50),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      itemBuilder: (context) => [
+        // Header cu Hello
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Hello, ${profile?.displayName ?? "User"}!',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                profile?.email ?? '',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+
+        // Settings (placeholder pentru viitor)
+        const PopupMenuItem<String>(
+          value: 'settings',
+          child: Row(
+            children: [
+              Icon(Icons.settings, size: 20),
+              SizedBox(width: 12),
+              Text('Settings'),
+            ],
+          ),
+        ),
+
+        // Library (go back to library)
+        const PopupMenuItem<String>(
+          value: 'library',
+          child: Row(
+            children: [
+              Icon(Icons.library_books, size: 20),
+              SizedBox(width: 12),
+              Text('Library'),
+            ],
+          ),
+        ),
+
+        const PopupMenuDivider(),
+
+        // Logout
+        const PopupMenuItem<String>(
+          value: 'logout',
+          child: Row(
+            children: [
+              Icon(Icons.exit_to_app, size: 20, color: Colors.red),
+              SizedBox(width: 12),
+              Text('Logout', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ],
+      onSelected: (value) {
+        switch (value) {
+          case 'settings':
+            // TODO: Implementare settings în viitor
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Settings - Coming soon!'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+            break;
+          case 'library':
+            // Deja suntem în library, dar poți face refresh sau scroll to top
+            break;
+          case 'logout':
+            FirebaseAuth.instance.signOut();
+            break;
+        }
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -256,10 +349,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         backgroundColor: const Color(0xFF8B4513),
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () => FirebaseAuth.instance.signOut(),
-          ),
+          // ✅ User Menu (înlocuiește butonul de logout)
+          if (user != null)
+            StreamBuilder<UserProfile?>(
+              stream: _userService.watchUserProfile(user.uid),
+              builder: (context, snapshot) {
+                return _buildUserMenu(snapshot.data);
+              },
+            ),
         ],
       ),
       body: user == null

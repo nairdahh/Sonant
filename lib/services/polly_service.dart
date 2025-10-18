@@ -63,12 +63,7 @@ class PollyService {
         'engine': engine,
       });
 
-      if (result.data == null) {
-        debugPrint('❌ Cloud Function returned null');
-        return null;
-      }
-
-      final data = result.data!;
+      final data = result.data;
 
       // Parse response
       final audioUrl = data['audioUrl'] as String?;
@@ -133,9 +128,7 @@ class PollyService {
       final callable = _functions.httpsCallable('listVoices');
       final result = await callable.call<Map<String, dynamic>>();
 
-      if (result.data == null) return null;
-
-      final voicesData = result.data!['voices'] as List<dynamic>;
+      final voicesData = result.data['voices'] as List<dynamic>;
       return voicesData
           .map((v) => VoiceInfo.fromJson(v as Map<String, dynamic>))
           .toList();

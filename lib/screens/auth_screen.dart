@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/user_service.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -13,10 +14,13 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
+  final UserService _userService = UserService();
+
   var _isLogin = true;
   var _isLoading = false;
   String _userEmail = '';
   String _userPassword = '';
+  String _displayName = ''; // ✅ NOU
 
   void _trySubmit() async {
     final isValid = _formKey.currentState!.validate();
@@ -31,20 +35,58 @@ class _AuthScreenState extends State<AuthScreen> {
 
       try {
         if (_isLogin) {
+          // ✅ LOGIN
           await FirebaseAuth.instance.signInWithEmailAndPassword(
             email: _userEmail.trim(),
             password: _userPassword.trim(),
           );
+
+          // Actualizează last login
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            await _userService.updateLastLogin(user.uid);
+          }
         } else {
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          // ✅ SIGN UP
+          final userCredential =
+              await FirebaseAuth.instance.createUserWithEmailAndPassword(
             email: _userEmail.trim(),
             password: _userPassword.trim(),
           );
+
+          // Creează profilul user-ului
+          if (userCredential.user != null) {
+            await _userService.createUserProfile(
+              uid: userCredential.user!.uid,
+              email: _userEmail.trim(),
+              displayName: _displayName.trim(),
+            );
+
+            // Setează display name în Firebase Auth
+            await userCredential.user!.updateDisplayName(_displayName.trim());
+          }
         }
       } on FirebaseAuthException catch (err) {
         var message = 'A apărut o eroare, vă rugăm verificați datele.';
-        if (err.message != null) {
-          message = err.message!;
+
+        // Mesaje user-friendly
+        switch (err.code) {
+          case 'email-already-in-use':
+            message = 'Acest email este deja folosit.';
+            break;
+          case 'weak-password':
+            message = 'Parola este prea slabă.';
+            break;
+          case 'user-not-found':
+            message = 'Nu există cont cu acest email.';
+            break;
+          case 'wrong-password':
+            message = 'Parolă incorectă.';
+            break;
+          default:
+            if (err.message != null) {
+              message = err.message!;
+            }
         }
 
         if (mounted) {
@@ -76,8 +118,7 @@ class _AuthScreenState extends State<AuthScreen> {
       body: Center(
         child: SingleChildScrollView(
           child: Container(
-            constraints: const BoxConstraints(
-                maxWidth: 450), // ✅ Width mai mic pentru desktop
+            constraints: const BoxConstraints(maxWidth: 450),
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -130,6 +171,33 @@ class _AuthScreenState extends State<AuthScreen> {
                             ),
                           ),
                           const SizedBox(height: 24),
+
+                          // ✅ Display Name (doar la Sign Up)
+                          if (!_isLogin) ...[
+                            TextFormField(
+                              key: const ValueKey('displayName'),
+                              validator: (value) {
+                                if (value == null || value.trim().length < 2) {
+                                  return 'Numele trebuie să conțină cel puțin 2 caractere.';
+                                }
+                                return null;
+                              },
+                              decoration: InputDecoration(
+                                labelText: 'Nume afișat',
+                                prefixIcon: const Icon(Icons.person),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                hintText: 'ex: Ion Popescu',
+                              ),
+                              onSaved: (value) {
+                                _displayName = value!;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+
+                          // Email
                           TextFormField(
                             key: const ValueKey('email'),
                             validator: (value) {
@@ -151,6 +219,8 @@ class _AuthScreenState extends State<AuthScreen> {
                             },
                           ),
                           const SizedBox(height: 16),
+
+                          // Password
                           TextFormField(
                             key: const ValueKey('password'),
                             validator: (value) {
@@ -172,6 +242,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             },
                           ),
                           const SizedBox(height: 24),
+
                           if (_isLoading)
                             const CircularProgressIndicator()
                           else ...[

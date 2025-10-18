@@ -60,17 +60,14 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
     _savedBook = widget.savedBook;
 
-    // Încarcă cartea dacă avem date inițiale
     if (widget.initialFileBytes != null && widget.initialFileName != null) {
       _loadInitialBook();
     }
 
-    // Timer pentru salvare automată progres (la fiecare 10 secunde)
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       _saveProgress();
     });
 
-    // Track audio position pentru highlight
     _positionSubscription = _audioPlayer.positionStream.listen((position) {
       if (_speechMarks.isEmpty || !mounted) return;
 
@@ -86,7 +83,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       }
     });
 
-    // Auto-avans între pagini
     _audioPlayer.playerStateStream.listen((state) {
       if (mounted) {
         setState(() {
@@ -113,7 +109,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     if (mounted) {
       setState(() {
         _currentBook = book;
-        // Restaurează progresul dacă avem SavedBook
         _currentPageIndex = widget.savedBook?.lastPageIndex ?? 0;
         _isLoading = false;
       });
@@ -124,7 +119,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     }
   }
 
-  /// Salvează progresul curent în Firebase
   Future<void> _saveProgress() async {
     if (_savedBook == null || _currentBook == null) return;
 
@@ -151,9 +145,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     if (_currentPageIndex < (_currentBook?.pages.length ?? 0) - 1) {
       _currentPageIndex++;
 
-      // ✅ Navigare programatică (auto-advance) - PERMISĂ
       if (_pageController.hasClients) {
-        // Temporar activăm navigarea pentru auto-advance
         _pageController.animateToPage(
           _currentPageIndex,
           duration: const Duration(milliseconds: 400),
@@ -198,7 +190,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           _wordHighlights = [];
           _currentWordIndex = -1;
           _audioCache = {};
-          _savedBook = null; // ✅ Resetăm savedBook pentru cărți noi
+          _savedBook = null;
           _audioPlayer.stop();
         });
 
@@ -224,7 +216,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       return;
     }
 
-    // ✅ Dacă avem cache, redăm direct
     if (_audioCache.containsKey(_currentPageIndex)) {
       await _playFromCache(_currentPageIndex);
       _preloadNext2Pages();
@@ -236,16 +227,13 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     });
 
     try {
-      // 🚀 OPTIMIZARE: Generăm DOAR prima pagină, redăm imediat
       debugPrint('🎵 Generăm pagina curentă...');
       await _preloadPageAudio(_currentPageIndex);
 
-      // ✅ Redăm imediat după ce prima pagină e gata
       if (_audioCache.containsKey(_currentPageIndex) && mounted) {
         await _playFromCache(_currentPageIndex);
       }
 
-      // 🎵 Generăm următoarele 2 în fundal (fără await)
       Future.microtask(() async {
         for (int i = 1; i <= 2; i++) {
           final pageIdx = _currentPageIndex + i;
@@ -267,41 +255,30 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
   Future<void> _playFromCache(int pageIndex) async {
     final cachedResponse = _audioCache[pageIndex]!;
-
-    // Pregătim highlight-urile pentru pagina curentă
     final page = _currentBook!.pages[pageIndex];
 
-    // 🎯 CALIBRARE EXACTĂ: Căutăm cuvintele în textul real
     _wordHighlights = [];
     final pageContent = page.content;
 
     for (final mark in cachedResponse.speechMarks) {
       if (mark.type != 'word') continue;
 
-      // Verificăm dacă mark-ul e în această pagină
       if (mark.start < page.startCharIndex || mark.start >= page.endCharIndex) {
         continue;
       }
 
-      // Poziția relativă în pagină
       final localStart = mark.start - page.startCharIndex;
-
-      // 🔍 Căutăm cuvântul în textul real
-      // Polly dă poziții aproximative, trebuie să căutăm cuvântul real
       final searchWord =
           mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
 
-      // Căutăm în jurul poziției date de Polly (±50 caractere)
       final searchStart = (localStart - 50).clamp(0, pageContent.length);
       final searchEnd =
           (localStart + mark.value.length + 50).clamp(0, pageContent.length);
       final searchArea = pageContent.substring(searchStart, searchEnd);
 
-      // Găsim toate cuvintele din zona de căutare
       final wordRegex = RegExp(r'\b\w+\b');
       final matches = wordRegex.allMatches(searchArea);
 
-      // Găsim cel mai apropiat match
       int bestMatchStart = localStart;
       int bestMatchEnd = localStart + mark.value.length;
       int bestDistance = 999999;
@@ -322,7 +299,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         }
       }
 
-      // Verificăm bounds
       if (bestMatchStart >= 0 &&
           bestMatchEnd <= pageContent.length &&
           bestMatchStart < bestMatchEnd) {
@@ -440,43 +416,100 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     });
   }
 
-  void _showTableOfContents() {
-    if (_currentBook == null) return;
+  // ✅ NOU: Drawer pentru cuprins (din stânga)
+  Widget _buildTableOfContentsDrawer() {
+    if (_currentBook == null) return const SizedBox.shrink();
 
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
+    return Drawer(
+      child: Container(
+        color: const Color(0xFFFFFDF7),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Cuprins',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
+            // Header drawer
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF8B4513),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.menu_book,
+                    color: Colors.white,
+                    size: 32,
                   ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Cuprins',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _currentBook!.title,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            const Divider(),
+
+            // Lista capitole
             Expanded(
               child: ListView.builder(
                 itemCount: _currentBook!.chapters.length,
                 itemBuilder: (context, index) {
                   final chapter = _currentBook!.chapters[index];
+                  final pageIndex = _currentBook!.pages.indexWhere(
+                    (page) => page.chapterNumber == chapter.number,
+                  );
+                  final isCurrentChapter = pageIndex != -1 &&
+                      _currentPageIndex >= pageIndex &&
+                      (_currentPageIndex < _currentBook!.pages.length - 1 &&
+                          _currentBook!
+                                  .pages[_currentPageIndex].chapterNumber ==
+                              chapter.number);
+
                   return ListTile(
                     leading: CircleAvatar(
-                      child: Text('${chapter.number}'),
+                      backgroundColor: isCurrentChapter
+                          ? const Color(0xFF8B4513)
+                          : Colors.brown[100],
+                      foregroundColor:
+                          isCurrentChapter ? Colors.white : Colors.brown[700],
+                      child: Text(
+                        '${chapter.number}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
-                    title: Text(chapter.title),
+                    title: Text(
+                      chapter.title,
+                      style: TextStyle(
+                        fontWeight: isCurrentChapter
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: isCurrentChapter
+                            ? const Color(0xFF8B4513)
+                            : Colors.black87,
+                      ),
+                    ),
                     subtitle: Text(
                       chapter.isSubChapter ? 'Subcapitol' : 'Capitol',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
                     ),
                     onTap: () {
-                      // Găsim prima pagină din capitol
-                      final pageIndex = _currentBook!.pages.indexWhere(
-                        (page) => page.chapterNumber == chapter.number,
-                      );
-
                       if (pageIndex != -1) {
                         setState(() {
                           _currentPageIndex = pageIndex;
@@ -486,7 +519,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                         });
                         _stopAudio();
                         _pageController.jumpToPage(pageIndex);
-                        Navigator.pop(context);
+                        Navigator.pop(context); // Închide drawer
                       }
                     },
                   );
@@ -500,8 +533,13 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   }
 
   @override
+  void deactivate() {
+    _saveProgress();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
-    _saveProgress(); // Salvează progresul la ieșire
     _audioPlayer.dispose();
     _positionSubscription?.cancel();
     _progressSaveTimer?.cancel();
@@ -515,41 +553,54 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFFFFDF7),
+      // ✅ Drawer pentru cuprins
+      drawer: _buildTableOfContentsDrawer(),
       appBar: AppBar(
         title: Text(_currentBook?.title ?? 'Sonant Reader'),
         backgroundColor: const Color(0xFF8B4513),
         foregroundColor: Colors.white,
+        // ✅ Leading: buton pentru deschidere drawer (cuprins)
         leading: _currentBook != null
             ? IconButton(
                 icon: const Icon(Icons.menu_book),
-                onPressed: _showTableOfContents,
+                onPressed: () {
+                  _scaffoldKey.currentState?.openDrawer();
+                },
                 tooltip: 'Cuprins',
               )
             : null,
         actions: [
+          // ✅ NOU: Buton Close pentru a ieși din carte
+          if (_currentBook != null)
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                _stopAudio();
+                _saveProgress();
+                Navigator.of(context).pop();
+              },
+              tooltip: 'Închide cartea',
+            ),
           if (_currentBook != null)
             IconButton(
               icon: const Icon(Icons.info_outline),
               onPressed: _showBookInfo,
             ),
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () => FirebaseAuth.instance.signOut(),
-          ),
         ],
       ),
       body: _buildBody(),
       bottomNavigationBar: _currentBook != null ? _buildControls() : null,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _pickBook,
-        backgroundColor: const Color(0xFF8B4513),
-        child: const Icon(Icons.menu_book, color: Colors.white),
-      ),
+      floatingActionButton: _currentBook == null
+          ? FloatingActionButton(
+              onPressed: _pickBook,
+              backgroundColor: const Color(0xFF8B4513),
+              child: const Icon(Icons.menu_book, color: Colors.white),
+            )
+          : null,
     );
   }
 
   Widget _buildBody() {
-    // ✅ Loading overlay la deschidere carte
     if (_isLoading) {
       return Container(
         color: const Color(0xFFFFFDF7),
@@ -599,7 +650,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
     return PageView.builder(
       controller: _pageController,
-      // ✅ Dezactivăm DOAR swipe manual când audio redă
       physics: _isPlaying
           ? const NeverScrollableScrollPhysics()
           : const PageScrollPhysics(),
@@ -611,11 +661,9 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           _speechMarks = [];
           _wordHighlights = [];
         });
-        // Reset scroll position
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(0);
         }
-        // Salvează progresul (fără await pentru a nu bloca UI)
         _saveProgress();
       },
       itemBuilder: (context, index) {
@@ -626,7 +674,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   }
 
   Widget _buildPage(BookPage page) {
-    // Verificăm dacă e început de capitol
     final isChapterStart = _currentPageIndex == 0 ||
         _currentBook!.pages[_currentPageIndex - 1].chapterNumber !=
             page.chapterNumber;
@@ -643,7 +690,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header pagină
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -682,8 +728,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       ],
                     ),
                     const Divider(height: 24),
-
-                    // 🎯 Capitol header (doar dacă e începutul unui capitol)
                     if (isChapterStart) ...[
                       Container(
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -710,8 +754,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       ),
                       const SizedBox(height: 16),
                     ],
-
-                    // ✅ Afișăm elementele paginii (text + imagini)
                     ...page.elements
                         .where((e) => e.type == ChapterElementType.image)
                         .map((element) {
@@ -751,8 +793,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       }
                       return const SizedBox.shrink();
                     }),
-
-                    // ✨ TEXT CU HIGHLIGHT PERFORMANT
                     HighlightedText(
                       text: page.content,
                       highlights: _wordHighlights,
@@ -780,14 +820,11 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       },
                       scrollController: _scrollController,
                     ),
-
                     const SizedBox(height: 40),
                   ],
                 ),
               ),
             ),
-
-            // Progress bar
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -831,7 +868,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ✅ Loading simplu când generăm audio
           if (_isLoadingAudio)
             const Padding(
               padding: EdgeInsets.only(bottom: 12),
@@ -848,11 +884,9 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 ],
               ),
             ),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // ✅ Disabled când audio redă (doar navigare manuală)
               IconButton(
                 icon: Icon(
                   Icons.chevron_left,
@@ -863,7 +897,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 ),
                 onPressed: (_currentPageIndex > 0 && !_isPlaying)
                     ? () {
-                        _stopAudio(); // Stop audio dacă există
+                        _stopAudio();
                         _pageController.previousPage(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeInOut,
@@ -915,7 +949,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 onPressed: _isLoadingAudio ? null : _playCurrentPage,
                 tooltip: 'Citește pagina curentă',
               ),
-              // ✅ Disabled când audio redă (doar navigare manuală)
               IconButton(
                 icon: Icon(
                   Icons.chevron_right,
@@ -929,7 +962,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                     (_currentPageIndex < _currentBook!.pages.length - 1 &&
                             !_isPlaying)
                         ? () {
-                            _stopAudio(); // Stop audio dacă există
+                            _stopAudio();
                             _pageController.nextPage(
                               duration: const Duration(milliseconds: 300),
                               curve: Curves.easeInOut,
