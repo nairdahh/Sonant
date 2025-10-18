@@ -46,7 +46,8 @@ class FirestoreService {
   Future<bool> testFirestoreConnection() async {
     try {
       debugPrint('🧪 Testare conexiune Firestore...');
-      debugPrint('   Database: ${_firestore.app.name}');
+      debugPrint('   Database ID: ${kIsWeb ? "sonantdb" : "(default)"}');
+      debugPrint('   App Name: ${_firestore.app.name}');
 
       // ✅ Test simplu: citim un document inexistent (nu va da eroare, doar null)
       final testDoc =
@@ -81,37 +82,15 @@ class FirestoreService {
     } catch (e, stackTrace) {
       debugPrint('❌ Test Firestore eșuat: $e');
 
-      // ✅ Fix: Verificăm lungimea stack trace-ului înainte de substring
       final stackString = stackTrace.toString();
       final maxLength = stackString.length < 500 ? stackString.length : 500;
       debugPrint('Stack: ${stackString.substring(0, maxLength)}...');
 
-      // Detalii suplimentare despre eroare
       if (e.toString().contains('permission-denied')) {
         debugPrint('');
-        debugPrint('⚠️ PERMISSION DENIED - Regulile Firestore blochează!');
-        debugPrint('');
-        debugPrint('📝 Fix în Firebase Console:');
-        debugPrint('   1. Firestore → Databases → sonantdb → Rules');
-        debugPrint('   2. Înlocuiește cu:');
-        debugPrint('');
-        debugPrint('   rules_version = "2";');
-        debugPrint('   service cloud.firestore {');
-        debugPrint('     match /databases/sonantdb/documents {');
-        debugPrint('       match /{document=**} {');
-        debugPrint('         allow read, write: if true;');
-        debugPrint('       }');
-        debugPrint('     }');
-        debugPrint('   }');
-        debugPrint('');
-        debugPrint('   3. Click "Publish"');
-        debugPrint('');
-      } else if (e.toString().contains('400')) {
-        debugPrint('');
-        debugPrint('⚠️ EROARE 400 - Posibile cauze:');
-        debugPrint('   1. Database ID incorect');
-        debugPrint('   2. Firestore nu e activat');
-        debugPrint('');
+        debugPrint('⚠️ PERMISSION DENIED - Verifică regulile Firestore!');
+        debugPrint('Database: sonantdb');
+        debugPrint('Path: /databases/sonantdb/documents');
       }
 
       return false;

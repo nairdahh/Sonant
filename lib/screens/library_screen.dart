@@ -25,8 +25,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    // 🧪 Test conexiune Firestore
-    _testFirestore();
   }
 
   Future<void> _testFirestore() async {

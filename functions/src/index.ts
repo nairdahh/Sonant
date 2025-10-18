@@ -176,7 +176,7 @@ export const synthesizeSpeech = onCall(
       // ✅ Return rezultat
       return {
         success: true,
-        audioBase64: audioBase64,
+        audioUrl: `data:audio/mpeg;base64,${audioBase64}`, // ✅ audioUrl în loc de audioBase64
         speechMarks: speechMarks,
         voiceId: voiceId,
         engine: engine,
