@@ -4,23 +4,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import 'package:http/http.dart' as http; // ✅ NOU
+import 'package:http/http.dart' as http; // NOU
 import '../models/saved_book.dart';
 
 class FirestoreService {
-  // ✅ FIX PRINCIPAL: Specificăm explicit database ID-ul!
+  
   late final FirebaseFirestore _firestore;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final _uuid = const Uuid();
 
   FirestoreService() {
     try {
-      // 🎯 CRUCIAL: Specificăm database ID-ul explicit pentru Web!
+      
       if (kIsWeb) {
-        // Pentru Web, TREBUIE să specificăm database ID-ul
+        
         _firestore = FirebaseFirestore.instanceFor(
           app: FirebaseFirestore.instance.app,
-          databaseId: 'sonantdb', // ✅ DATABASE ID-ul tău!
+          databaseId: 'sonantdb', 
         );
 
         // Settings pentru Web
@@ -49,14 +49,14 @@ class FirestoreService {
       debugPrint('   Database ID: ${kIsWeb ? "sonantdb" : "(default)"}');
       debugPrint('   App Name: ${_firestore.app.name}');
 
-      // ✅ Test simplu: citim un document inexistent (nu va da eroare, doar null)
+      // Test simplu: citim un document inexistent (nu va da eroare, doar null)
       final testDoc =
           await _firestore.collection('_test').doc('connection_test').get();
 
       debugPrint(
           '   ✅ Citire testată cu succes (doc exists: ${testDoc.exists})');
 
-      // ✅ Test scriere
+      // Test scriere
       await _firestore.collection('_test').doc('connection_test').set({
         'timestamp': FieldValue.serverTimestamp(),
         'message': 'connection test',
@@ -64,14 +64,14 @@ class FirestoreService {
 
       debugPrint('   ✅ Scriere testată cu succes');
 
-      // Citim înapoi pentru confirmare
+      
       final verifyDoc =
           await _firestore.collection('_test').doc('connection_test').get();
 
       if (verifyDoc.exists) {
         debugPrint('   ✅ Verificare reușită: ${verifyDoc.data()}');
 
-        // Curățăm test data
+        
         await _firestore.collection('_test').doc('connection_test').delete();
 
         return true;
@@ -117,7 +117,7 @@ class FirestoreService {
       debugPrint('   User ID: $userId');
       debugPrint('   Book ID: $bookId');
 
-      // 1. Upload fișier în Storage
+      
       debugPrint('   Upload fișier în Storage...');
       final fileRef =
           _storage.ref().child('users/$userId/books/$bookId/$fileName');
@@ -128,7 +128,7 @@ class FirestoreService {
       final fileUrl = await uploadTask.ref.getDownloadURL();
       debugPrint('   ✅ Fișier uploadat: $fileUrl');
 
-      // 2. Upload copertă (dacă există)
+      
       String? coverImageUrl;
       if (coverImageBytes != null) {
         debugPrint('   Upload copertă...');
@@ -257,7 +257,7 @@ class FirestoreService {
       debugPrint('📥 Descărcăm carte din: $fileUrl');
 
       if (kIsWeb) {
-        // ✅ Pentru Web, folosim HTTP fetch direct
+        // Pentru Web, folosim HTTP fetch direct
         debugPrint('   Folosim HTTP fetch pentru Web...');
 
         // Import necesar: dart:html (doar pentru Web)
@@ -267,7 +267,7 @@ class FirestoreService {
         final ref = _storage.refFromURL(fileUrl);
         debugPrint('   Ref path: ${ref.fullPath}');
 
-        // ✅ Specificăm maxSize explicit (100MB)
+        // Specificăm maxSize explicit (100MB)
         const maxSize = 100 * 1024 * 1024; // 100MB
         final data = await ref.getData(maxSize);
 
@@ -277,7 +277,7 @@ class FirestoreService {
         } else {
           debugPrint('   ❌ getData() a returnat null');
 
-          // ✅ Fallback: Încercăm download direct prin URL
+          // Fallback: Încercăm download direct prin URL
           debugPrint('   Încercăm download HTTP direct...');
           return await _downloadViaHttp(fileUrl);
         }
@@ -300,7 +300,7 @@ class FirestoreService {
       final maxLength = stackString.length < 300 ? stackString.length : 300;
       debugPrint('   Stack: ${stackString.substring(0, maxLength)}');
 
-      // ✅ Încercăm fallback la HTTP
+      // Încercăm fallback la HTTP
       if (kIsWeb) {
         debugPrint('   Încercăm fallback la HTTP...');
         try {
@@ -319,7 +319,7 @@ class FirestoreService {
     try {
       debugPrint('   📡 HTTP download: $url');
 
-      // ✅ Folosim package http pentru download
+      // Folosim package http pentru download
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {

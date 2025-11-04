@@ -2,16 +2,17 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:just_audio/just_audio.dart';
 import '../services/advanced_book_parser_service.dart';
-import '../services/polly_service.dart';
+import '../services/tts_service.dart';
 import '../services/firestore_service.dart';
+import '../services/highlight_manager.dart';
 import '../models/polly_response.dart';
 import '../models/saved_book.dart';
 import '../widgets/highlighted_text_widget.dart';
-import 'dart:typed_data';
 
 class UpdatedBookReaderScreen extends StatefulWidget {
   final Uint8List? initialFileBytes;
@@ -32,7 +33,7 @@ class UpdatedBookReaderScreen extends StatefulWidget {
 
 class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   final AdvancedBookParser _bookParser = AdvancedBookParser();
-  final PollyService _pollyService = PollyService();
+  final TTSService _ttsService = TTSService();
   final FirestoreService _firestoreService = FirestoreService();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final PageController _pageController = PageController();
@@ -44,21 +45,43 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   int _currentPageIndex = 0;
   bool _isLoading = false;
   bool _isLoadingAudio = false;
-  String _selectedVoice = 'Joanna';
+  double _ttsProgress = 0.0;
+  String _selectedVoice = 'af_bella';
   bool _isPlaying = false;
+  String? _lastError;
+  double _volume = 1.0;
+  double _playbackSpeed = 1.0;
 
   Map<int, PollyResponse> _audioCache = {};
-  List<SpeechMark> _speechMarks = [];
-  List<WordHighlight> _wordHighlights = [];
-  int _currentWordIndex = -1;
-  StreamSubscription<Duration>? _positionSubscription;
   Timer? _progressSaveTimer;
+
+  // Tracks pages currently being preloaded to prevent duplicate requests
+  final Set<int> _preloadingPages = {};
+
+  late HighlightManager _highlightManager;
+  HighlightState _highlightState = HighlightState(
+    currentPageIndex: -1,
+    currentWordIndex: -1,
+    wordHighlights: [],
+    isActive: false,
+  );
 
   @override
   void initState() {
     super.initState();
 
     _savedBook = widget.savedBook;
+
+    _highlightManager = HighlightManager(
+      audioPlayer: _audioPlayer,
+      onStateChanged: (state) {
+        if (mounted) {
+          setState(() {
+            _highlightState = state;
+          });
+        }
+      },
+    );
 
     if (widget.initialFileBytes != null && widget.initialFileName != null) {
       _loadInitialBook();
@@ -68,20 +91,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       _saveProgress();
     });
 
-    _positionSubscription = _audioPlayer.positionStream.listen((position) {
-      if (_speechMarks.isEmpty || !mounted) return;
-
-      final currentMillis = position.inMilliseconds;
-      final lastMarkIndex = _speechMarks.lastIndexWhere(
-        (mark) => mark.time <= currentMillis && mark.type == 'word',
-      );
-
-      if (lastMarkIndex != _currentWordIndex) {
-        setState(() {
-          _currentWordIndex = lastMarkIndex;
-        });
-      }
-    });
+    _audioPlayer.setVolume(_volume);
+    _audioPlayer.setSpeed(_playbackSpeed);
 
     _audioPlayer.playerStateStream.listen((state) {
       if (mounted) {
@@ -135,12 +146,11 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   void _handleAudioComplete() {
     if (!mounted) return;
 
-    debugPrint('✅ Audio terminat, trecem la următoarea pagină...');
-
     setState(() {
       _isPlaying = false;
-      _currentWordIndex = -1;
     });
+
+    _highlightManager.stop();
 
     if (_currentPageIndex < (_currentBook?.pages.length ?? 0) - 1) {
       _currentPageIndex++;
@@ -162,8 +172,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           }
         }
       });
-    } else {
-      debugPrint('📖 Ultima pagină - citire completă!');
     }
   }
 
@@ -186,21 +194,20 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           _currentBook = book;
           _currentPageIndex = 0;
           _isLoading = false;
-          _speechMarks = [];
-          _wordHighlights = [];
-          _currentWordIndex = -1;
           _audioCache = {};
           _savedBook = null;
-          _audioPlayer.stop();
         });
+
+        _highlightManager.stop();
+        _audioPlayer.stop();
 
         if (book != null) {
           _pageController.jumpToPage(0);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Carte încărcată: ${book.title}\n'
-                '${book.chapters.length} capitole, ${book.pages.length} pagini',
+                'Book loaded: ${book.title}\n'
+                '${book.chapters.length} chapters, ${book.pages.length} pages',
               ),
               duration: const Duration(seconds: 2),
             ),
@@ -224,14 +231,20 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
     setState(() {
       _isLoadingAudio = true;
+      _ttsProgress = 0.0;
+      _lastError = null;
     });
 
     try {
-      debugPrint('🎵 Generăm pagina curentă...');
       await _preloadPageAudio(_currentPageIndex);
 
       if (_audioCache.containsKey(_currentPageIndex) && mounted) {
         await _playFromCache(_currentPageIndex);
+      } else if (mounted) {
+        // TTS failed to generate audio
+        setState(() {
+          _lastError = 'Could not generate audio for this page. Please try again.';
+        });
       }
 
       Future.microtask(() async {
@@ -240,16 +253,22 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           if (pageIdx < _currentBook!.pages.length &&
               !_audioCache.containsKey(pageIdx)) {
             await _preloadPageAudio(pageIdx);
-            debugPrint('✅ [FUNDAL] Pagina ${pageIdx + 1} gata!');
           }
         }
       });
     } catch (e) {
-      debugPrint('❌ Eroare la redarea paginii: $e');
+      if (mounted) {
+        setState(() {
+          _lastError = 'Error: ${e.toString()}';
+        });
+      }
     }
 
     if (mounted) {
-      setState(() => _isLoadingAudio = false);
+      setState(() {
+        _isLoadingAudio = false;
+        _ttsProgress = 0.0;
+      });
     }
   }
 
@@ -257,10 +276,57 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     final cachedResponse = _audioCache[pageIndex]!;
     final page = _currentBook!.pages[pageIndex];
 
-    _wordHighlights = [];
+    await _audioPlayer.setUrl(cachedResponse.audioUrl!);
+    await _audioPlayer.load();
+
+    final actualDuration = _audioPlayer.duration;
+    List<SpeechMark> calibratedMarks = cachedResponse.speechMarks;
+
+    // Aggressive auto-calibration with predictive offset
+    if (actualDuration != null && calibratedMarks.isNotEmpty) {
+      final estimatedDuration = calibratedMarks.last.time;
+      final actualDurationMs = actualDuration.inMilliseconds;
+
+      final scaleFactor = actualDurationMs / estimatedDuration;
+
+      // Reduced threshold from 3% to 0.5% for more accurate calibration
+      // Global offset: -80ms advances highlights to compensate for audio pipeline latency
+      const double calibrationThreshold = 0.005;
+      const int globalOffsetMs = -80;
+
+      if ((scaleFactor - 1.0).abs() > calibrationThreshold) {
+        calibratedMarks = calibratedMarks.map((mark) {
+          // Apply both scaling and global offset, then clamp to valid range
+          final adjustedTime = ((mark.time * scaleFactor).round() + globalOffsetMs)
+              .clamp(0, actualDurationMs);
+
+          return SpeechMark(
+            time: adjustedTime,
+            type: mark.type,
+            start: mark.start,
+            end: mark.end,
+            value: mark.value,
+          );
+        }).toList();
+      } else {
+        // Even if scaling not needed, apply global offset for latency compensation
+        calibratedMarks = calibratedMarks.map((mark) {
+          return SpeechMark(
+            time: (mark.time + globalOffsetMs).clamp(0, actualDurationMs),
+            type: mark.type,
+            start: mark.start,
+            end: mark.end,
+            value: mark.value,
+          );
+        }).toList();
+      }
+    }
+
+    // Map speech marks to word highlights with exact position matching
+    final wordHighlights = <WordHighlight>[];
     final pageContent = page.content;
 
-    for (final mark in cachedResponse.speechMarks) {
+    for (final mark in calibratedMarks) {
       if (mark.type != 'word') continue;
 
       if (mark.start < page.startCharIndex || mark.start >= page.endCharIndex) {
@@ -268,14 +334,31 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       }
 
       final localStart = mark.start - page.startCharIndex;
-      final searchWord =
-          mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
 
-      final searchStart = (localStart - 50).clamp(0, pageContent.length);
-      final searchEnd =
-          (localStart + mark.value.length + 50).clamp(0, pageContent.length);
+      // Try exact position first
+      if (localStart >= 0 && localStart < pageContent.length) {
+        final expectedEnd = (localStart + mark.value.length).clamp(0, pageContent.length);
+        final textAtPosition = pageContent.substring(localStart, expectedEnd);
+
+        final cleanExpected = mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+        final cleanActual = textAtPosition.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+
+        if (cleanExpected == cleanActual) {
+          wordHighlights.add(WordHighlight(
+            start: localStart,
+            end: expectedEnd,
+            word: textAtPosition,
+          ));
+          continue;
+        }
+      }
+
+      // Fallback: fuzzy search within 25 char window
+      final searchStart = (localStart - 25).clamp(0, pageContent.length);
+      final searchEnd = (localStart + mark.value.length + 25).clamp(0, pageContent.length);
       final searchArea = pageContent.substring(searchStart, searchEnd);
 
+      final cleanSearchWord = mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
       final wordRegex = RegExp(r'\b\w+\b');
       final matches = wordRegex.allMatches(searchArea);
 
@@ -285,9 +368,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
       for (final match in matches) {
         final matchWord = match.group(0)!.toLowerCase();
-        if (matchWord == searchWord ||
-            (matchWord.length >= 3 &&
-                searchWord.startsWith(matchWord.substring(0, 3)))) {
+        if (matchWord == cleanSearchWord) {
           final absoluteStart = searchStart + match.start;
           final distance = (absoluteStart - localStart).abs();
 
@@ -302,7 +383,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       if (bestMatchStart >= 0 &&
           bestMatchEnd <= pageContent.length &&
           bestMatchStart < bestMatchEnd) {
-        _wordHighlights.add(WordHighlight(
+        wordHighlights.add(WordHighlight(
           start: bestMatchStart,
           end: bestMatchEnd,
           word: pageContent.substring(bestMatchStart, bestMatchEnd),
@@ -310,12 +391,12 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       }
     }
 
-    setState(() {
-      _speechMarks = cachedResponse.speechMarks;
-      _currentWordIndex = -1;
-    });
+    _highlightManager.initializeForPage(
+      pageIndex: pageIndex,
+      speechMarks: calibratedMarks,
+      wordHighlights: wordHighlights,
+    );
 
-    await _audioPlayer.setUrl(cachedResponse.audioUrl!);
     _audioPlayer.play();
     _preloadNext2Pages();
   }
@@ -329,21 +410,35 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       return;
     }
 
+    if (_preloadingPages.contains(pageIndex)) {
+      return;
+    }
+
+    _preloadingPages.add(pageIndex);
+
     try {
       final page = _currentBook!.pages[pageIndex];
 
-      if (page.content.length > 2900) {
+      // Text length validation (silent in production)
+      if (kDebugMode && page.content.length > TTSService.maxTextLength * 0.9) {
         debugPrint(
-            '⚠️ Pagina ${pageIndex + 1} prea lungă (${page.content.length} char)');
+            'Page ${pageIndex + 1} near TTS limit: ${page.content.length}/${TTSService.maxTextLength} chars');
       }
 
-      final pollyResponse = await _pollyService.synthesizeSpeech(
+      final ttsResponse = await _ttsService.synthesizeSpeech(
         page.content,
         voiceId: _selectedVoice,
+        bookId: _savedBook?.id,
+        pageIndex: pageIndex,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _ttsProgress = progress);
+          }
+        },
       );
 
-      if (pollyResponse != null && pollyResponse.audioUrl != null) {
-        final adjustedMarks = pollyResponse.speechMarks.map((mark) {
+      if (ttsResponse != null && ttsResponse.audioUrl != null) {
+        final adjustedMarks = ttsResponse.speechMarks.map((mark) {
           return SpeechMark(
             time: mark.time,
             type: mark.type,
@@ -354,14 +449,20 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         }).toList();
 
         _audioCache[pageIndex] = PollyResponse(
-          audioUrl: pollyResponse.audioUrl,
+          audioUrl: ttsResponse.audioUrl,
           speechMarks: adjustedMarks,
         );
 
-        debugPrint('✅ Pagina ${pageIndex + 1} → Cache');
+        if (kDebugMode) {
+          debugPrint('Page ${pageIndex + 1} cached successfully');
+        }
       }
     } catch (e) {
-      debugPrint('❌ EROARE pagina ${pageIndex + 1}: $e');
+      if (kDebugMode) {
+        debugPrint('Error generating audio for page ${pageIndex + 1}: $e');
+      }
+    } finally {
+      _preloadingPages.remove(pageIndex);
     }
   }
 
@@ -387,13 +488,17 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   }
 
   void _playFromWord(int wordIndex) async {
-    if (_speechMarks.isEmpty ||
+    final speechMarks = _highlightState.isActive
+        ? _audioCache[_currentPageIndex]?.speechMarks ?? []
+        : [];
+
+    if (speechMarks.isEmpty ||
         wordIndex < 0 ||
-        wordIndex >= _speechMarks.length) {
+        wordIndex >= speechMarks.length) {
       return;
     }
 
-    final mark = _speechMarks[wordIndex];
+    final mark = speechMarks[wordIndex];
 
     if (_audioPlayer.duration == null &&
         _audioCache.containsKey(_currentPageIndex)) {
@@ -403,20 +508,90 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
     await _audioPlayer.seek(Duration(milliseconds: mark.time));
     _audioPlayer.play();
-
-    setState(() {
-      _currentWordIndex = wordIndex;
-    });
   }
 
   void _stopAudio() {
     _audioPlayer.stop();
-    setState(() {
-      _currentWordIndex = -1;
-    });
+    _highlightManager.stop();
+    _ttsService.cancelAllRequests();
   }
 
-  // ✅ NOU: Drawer pentru cuprins (din stânga)
+  Future<void> _restartPage() async {
+    if (_audioPlayer.duration == null) {
+      await _playCurrentPage();
+    } else {
+      await _audioPlayer.seek(Duration.zero);
+      _audioPlayer.play();
+    }
+  }
+
+  void _setVolume(double volume) {
+    setState(() {
+      _volume = volume.clamp(0.0, 1.0);
+    });
+    _audioPlayer.setVolume(_volume);
+  }
+
+  void _setPlaybackSpeed(double speed) {
+    setState(() {
+      _playbackSpeed = speed.clamp(0.5, 2.0);
+    });
+    _audioPlayer.setSpeed(_playbackSpeed);
+  }
+
+  Future<void> _changeVoice(String newVoice) async {
+    if (newVoice == _selectedVoice) return;
+
+    final wasPlaying = _isPlaying;
+    final currentPosition = _audioPlayer.position;
+
+    setState(() {
+      _selectedVoice = newVoice;
+    });
+
+    _ttsService.cancelAllRequests();
+
+    // Smart cache invalidation: clear only pages near current position
+    final keysToRemove = _audioCache.keys.where((pageIdx) {
+      final distance = (pageIdx - _currentPageIndex).abs();
+      return distance <= 5;
+    }).toList();
+
+    for (final key in keysToRemove) {
+      _audioCache.remove(key);
+    }
+    if (kDebugMode) {
+      debugPrint('Cleared ${keysToRemove.length} cached pages near current page');
+    }
+
+    if (_audioPlayer.duration != null) {
+      await _audioPlayer.stop();
+      _highlightManager.stop();
+
+      setState(() {
+        _isLoadingAudio = true;
+      });
+
+      await _preloadPageAudio(_currentPageIndex);
+
+      if (_audioCache.containsKey(_currentPageIndex) && mounted) {
+        await _playFromCache(_currentPageIndex);
+
+        await _audioPlayer.seek(currentPosition);
+
+        if (wasPlaying) {
+          _audioPlayer.play();
+        } else {
+          _audioPlayer.pause();
+        }
+      }
+
+      setState(() {
+        _isLoadingAudio = false;
+      });
+    }
+  }
+
   Widget _buildTableOfContentsDrawer() {
     if (_currentBook == null) return const SizedBox.shrink();
 
@@ -425,7 +600,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         color: const Color(0xFFFFFDF7),
         child: Column(
           children: [
-            // Header drawer
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
@@ -442,7 +616,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Cuprins',
+                    'Table of Contents',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 24,
@@ -462,8 +636,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 ],
               ),
             ),
-
-            // Lista capitole
             Expanded(
               child: ListView.builder(
                 itemCount: _currentBook!.chapters.length,
@@ -503,7 +675,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       ),
                     ),
                     subtitle: Text(
-                      chapter.isSubChapter ? 'Subcapitol' : 'Capitol',
+                      chapter.isSubChapter ? 'Subchapter' : 'Chapter',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey[600],
@@ -513,13 +685,10 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       if (pageIndex != -1) {
                         setState(() {
                           _currentPageIndex = pageIndex;
-                          _currentWordIndex = -1;
-                          _speechMarks = [];
-                          _wordHighlights = [];
                         });
                         _stopAudio();
                         _pageController.jumpToPage(pageIndex);
-                        Navigator.pop(context); // Închide drawer
+                        Navigator.pop(context);
                       }
                     },
                   );
@@ -540,8 +709,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
   @override
   void dispose() {
+    _highlightManager.dispose();
     _audioPlayer.dispose();
-    _positionSubscription?.cancel();
     _progressSaveTimer?.cancel();
     _pageController.dispose();
     _scrollController.dispose();
@@ -553,24 +722,21 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFFFFDF7),
-      // ✅ Drawer pentru cuprins
       drawer: _buildTableOfContentsDrawer(),
       appBar: AppBar(
         title: Text(_currentBook?.title ?? 'Sonant Reader'),
         backgroundColor: const Color(0xFF8B4513),
         foregroundColor: Colors.white,
-        // ✅ Leading: buton pentru deschidere drawer (cuprins)
         leading: _currentBook != null
             ? IconButton(
                 icon: const Icon(Icons.menu_book),
                 onPressed: () {
                   _scaffoldKey.currentState?.openDrawer();
                 },
-                tooltip: 'Cuprins',
+                tooltip: 'Table of Contents',
               )
             : null,
         actions: [
-          // ✅ NOU: Buton Close pentru a ieși din carte
           if (_currentBook != null)
             IconButton(
               icon: const Icon(Icons.close),
@@ -579,7 +745,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                 _saveProgress();
                 Navigator.of(context).pop();
               },
-              tooltip: 'Închide cartea',
+              tooltip: 'Close book',
             ),
           if (_currentBook != null)
             IconButton(
@@ -613,7 +779,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'Se încarcă cartea...',
+                'Loading book...',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.brown[700],
@@ -634,13 +800,13 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
             Icon(Icons.auto_stories, size: 100, color: Colors.brown[300]),
             const SizedBox(height: 24),
             const Text(
-              'Apasă pe butonul de jos pentru\na încărca o carte',
+              'Press the button below\nto load a book',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 18, color: Colors.black54),
             ),
             const SizedBox(height: 16),
             const Text(
-              'Formate suportate: EPUB, PDF, TXT',
+              'Supported formats: EPUB, PDF, TXT',
               style: TextStyle(fontSize: 14, color: Colors.black38),
             ),
           ],
@@ -657,10 +823,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       onPageChanged: (index) {
         setState(() {
           _currentPageIndex = index;
-          _currentWordIndex = -1;
-          _speechMarks = [];
-          _wordHighlights = [];
         });
+        _highlightManager.stop();
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(0);
         }
@@ -717,7 +881,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                                 ),
                               ),
                             Text(
-                              'Pagina ${page.pageNumber}',
+                              'Page ${page.pageNumber}',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.brown[600],
@@ -779,7 +943,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                                           color: Colors.grey[400]),
                                       const SizedBox(width: 8),
                                       Text(
-                                        'Imagine nu poate fi afișată',
+                                        'Image cannot be displayed',
                                         style:
                                             TextStyle(color: Colors.grey[600]),
                                       ),
@@ -795,8 +959,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                     }),
                     HighlightedText(
                       text: page.content,
-                      highlights: _wordHighlights,
-                      currentHighlightIndex: _currentWordIndex,
+                      highlights: _highlightState.wordHighlights,
+                      currentHighlightIndex: _highlightState.currentWordIndex,
                       style: const TextStyle(
                         fontSize: 18,
                         height: 1.8,
@@ -806,15 +970,19 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                       ),
                       textAlign: TextAlign.justify,
                       onWordTap: (wordIndex) {
-                        if (wordIndex < _wordHighlights.length) {
-                          final localHighlight = _wordHighlights[wordIndex];
-                          final globalIndex = _speechMarks.indexWhere(
-                            (mark) =>
-                                mark.start - page.startCharIndex ==
-                                localHighlight.start,
-                          );
-                          if (globalIndex != -1) {
-                            _playFromWord(globalIndex);
+                        if (wordIndex < _highlightState.wordHighlights.length) {
+                          final localHighlight =
+                              _highlightState.wordHighlights[wordIndex];
+                          final cachedResponse = _audioCache[_currentPageIndex];
+                          if (cachedResponse != null) {
+                            final globalIndex = cachedResponse.speechMarks.indexWhere(
+                              (mark) =>
+                                  mark.start - page.startCharIndex ==
+                                  localHighlight.start,
+                            );
+                            if (globalIndex != -1) {
+                              _playFromWord(globalIndex);
+                            }
                           }
                         }
                       },
@@ -858,7 +1026,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, -2),
           ),
@@ -869,19 +1037,60 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_isLoadingAudio)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    width: double.infinity,
+                    child: LinearProgressIndicator(
+                      value: _ttsProgress,
+                      backgroundColor: Colors.grey[200],
+                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8B4513)),
+                    ),
                   ),
-                  SizedBox(width: 12),
-                  Text('Generare audio...', style: TextStyle(fontSize: 12)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Generating audio... ${(_ttsProgress * 100).toInt()}%',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
                 ],
+              ),
+            ),
+          if (_lastError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red[700], size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _lastError!,
+                        style: TextStyle(fontSize: 12, color: Colors.red[900]),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _lastError = null);
+                        _playCurrentPage();
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        minimumSize: Size.zero,
+                      ),
+                      child: const Text('Retry', style: TextStyle(fontSize: 12)),
+                    ),
+                  ],
+                ),
               ),
             ),
           Row(
@@ -904,12 +1113,27 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                         );
                       }
                     : null,
-                tooltip: 'Pagina anterioară',
+                tooltip: 'Previous page',
               ),
-              IconButton(
-                icon: const Icon(Icons.stop, size: 28),
-                onPressed: _isPlaying ? _stopAudio : null,
-                tooltip: 'Stop',
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.restart_alt, size: 28),
+                    onPressed:
+                        _audioPlayer.duration != null ? _restartPage : null,
+                    tooltip: 'Restart',
+                  ),
+                  Text(
+                    'Restart',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: _audioPlayer.duration != null
+                          ? Colors.black54
+                          : Colors.grey[300],
+                    ),
+                  ),
+                ],
               ),
               StreamBuilder<PlayerState>(
                 stream: _audioPlayer.playerStateStream,
@@ -940,14 +1164,29 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                         }
                       }
                     },
-                    tooltip: isPlaying ? 'Pauză' : 'Redare',
+                    tooltip: isPlaying ? 'Pause' : 'Play',
                   );
                 },
               ),
-              IconButton(
-                icon: const Icon(Icons.library_books, size: 28),
-                onPressed: _isLoadingAudio ? null : _playCurrentPage,
-                tooltip: 'Citește pagina curentă',
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.play_arrow, size: 28),
+                    onPressed: _isLoadingAudio ? null : _playCurrentPage,
+                    tooltip: 'Read page',
+                  ),
+                  Text(
+                    'Read from\nhere',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color:
+                          _isLoadingAudio ? Colors.grey[300] : Colors.black54,
+                      height: 1.1,
+                    ),
+                  ),
+                ],
               ),
               IconButton(
                 icon: Icon(
@@ -969,45 +1208,237 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                             );
                           }
                         : null,
-                tooltip: 'Pagina următoare',
+                tooltip: 'Next page',
               ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.record_voice_over,
-                    size: 16, color: Colors.black54),
-                const SizedBox(width: 8),
-                DropdownButton<String>(
-                  value: _selectedVoice,
-                  underline: Container(),
-                  style: const TextStyle(fontSize: 12, color: Colors.black87),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'Joanna', child: Text('Joanna (US) ♀')),
-                    DropdownMenuItem(
-                        value: 'Matthew', child: Text('Matthew (US) ♂')),
-                    DropdownMenuItem(value: 'Ivy', child: Text('Ivy (US) ♀')),
-                    DropdownMenuItem(value: 'Amy', child: Text('Amy (UK) ♀')),
-                    DropdownMenuItem(
-                        value: 'Brian', child: Text('Brian (UK) ♂')),
-                    DropdownMenuItem(value: 'Emma', child: Text('Emma (UK) ♀')),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.record_voice_over,
+                        size: 16, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    DropdownButton<String>(
+                      value: _selectedVoice,
+                      underline: Container(),
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.black87),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'af_bella',
+                          child: Text('Bella (US) ♀ ⭐'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'af_sarah',
+                          child: Text('Sarah (US) ♀'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'af_nicole',
+                          child: Text('Nicole (US) ♀'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'af_sky',
+                          child: Text('Sky (US) ♀'),
+                        ),
+
+                        DropdownMenuItem(
+                          value: 'am_adam',
+                          child: Text('Adam (US) ♂'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'am_michael',
+                          child: Text('Michael (US) ♂'),
+                        ),
+
+                        DropdownMenuItem(
+                          value: 'bf_emma',
+                          child: Text('Emma (UK) ♀'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'bf_isabella',
+                          child: Text('Isabella (UK) ♀'),
+                        ),
+
+                        DropdownMenuItem(
+                          value: 'bm_george',
+                          child: Text('George (UK) ♂'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'bm_lewis',
+                          child: Text('Lewis (UK) ♂'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          _changeVoice(value);
+                        }
+                      },
+                    ),
                   ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _selectedVoice = value);
-                      _audioCache.clear();
-                    }
-                  },
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: Icon(
+                  _volume == 0
+                      ? Icons.volume_off
+                      : _volume < 0.5
+                          ? Icons.volume_down
+                          : Icons.volume_up,
+                  size: 20,
+                ),
+                onPressed: () => _showVolumeControl(),
+                tooltip: 'Volume: ${(_volume * 100).toInt()}%',
+              ),
+              IconButton(
+                icon: const Icon(Icons.speed, size: 20),
+                onPressed: () => _showSpeedControl(),
+                tooltip: 'Speed: ${_playbackSpeed}x',
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  void _showVolumeControl() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.volume_up, size: 24),
+            SizedBox(width: 12),
+            Text('Volume'),
+          ],
+        ),
+        content: StatefulBuilder(
+          builder: (context, setState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.volume_down, size: 20),
+                    Expanded(
+                      child: Slider(
+                        value: _volume,
+                        min: 0.0,
+                        max: 1.0,
+                        divisions: 20,
+                        label: '${(_volume * 100).toInt()}%',
+                        onChanged: (value) {
+                          setState(() {
+                            _setVolume(value);
+                          });
+                        },
+                      ),
+                    ),
+                    const Icon(Icons.volume_up, size: 20),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${(_volume * 100).toInt()}%',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSpeedControl() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.speed, size: 24),
+            SizedBox(width: 12),
+            Text('Playback Speed'),
+          ],
+        ),
+        content: StatefulBuilder(
+          builder: (context, setState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Slider(
+                  value: _playbackSpeed,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 6,
+                  label: '${_playbackSpeed}x',
+                  onChanged: (value) {
+                    setState(() {
+                      _setPlaybackSpeed(value);
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '${_playbackSpeed}x',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    _buildSpeedChip(0.5, setState),
+                    _buildSpeedChip(0.75, setState),
+                    _buildSpeedChip(1.0, setState),
+                    _buildSpeedChip(1.25, setState),
+                    _buildSpeedChip(1.5, setState),
+                    _buildSpeedChip(2.0, setState),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedChip(double speed, StateSetter setState) {
+    final isSelected = (_playbackSpeed - speed).abs() < 0.01;
+    return ChoiceChip(
+      label: Text('${speed}x'),
+      selected: isSelected,
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            _setPlaybackSpeed(speed);
+          });
+        }
+      },
     );
   }
 
@@ -1022,27 +1453,29 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Autor: ${_currentBook!.author}'),
+            Text('Author: ${_currentBook!.author}'),
             const SizedBox(height: 8),
             Text('Format: ${_currentBook!.format.name.toUpperCase()}'),
             const SizedBox(height: 8),
-            Text('Capitole: ${_currentBook!.chapters.length}'),
+            Text('Chapters: ${_currentBook!.chapters.length}'),
             const SizedBox(height: 8),
-            Text('Total pagini: ${_currentBook!.pages.length}'),
+            Text('Total pages: ${_currentBook!.pages.length}'),
             const SizedBox(height: 8),
-            Text('Pagina curentă: ${_currentPageIndex + 1}'),
+            Text('Current page: ${_currentPageIndex + 1}'),
             const SizedBox(height: 8),
             Text(
-              'Progres: ${((_currentPageIndex + 1) / _currentBook!.pages.length * 100).toStringAsFixed(1)}%',
+              'Progress: ${((_currentPageIndex + 1) / _currentBook!.pages.length * 100).toStringAsFixed(1)}%',
             ),
             const SizedBox(height: 8),
-            Text('Audio în cache: ${_audioCache.length} pagini'),
+            Text('Cached audio: ${_audioCache.length} pages'),
+            const SizedBox(height: 8),
+            const Text('Engine: Kokoro TTS'),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Închide'),
+            child: const Text('Close'),
           ),
         ],
       ),

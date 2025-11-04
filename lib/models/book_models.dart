@@ -19,7 +19,7 @@ class Book {
 class BookPage {
   final int pageNumber;
   final String content;
-  final int startCharIndex; // Index în textul complet
+  final int startCharIndex; // Index in complete text
   final int endCharIndex;
 
   BookPage({

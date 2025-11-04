@@ -20,7 +20,7 @@ class _AuthScreenState extends State<AuthScreen> {
   var _isLoading = false;
   String _userEmail = '';
   String _userPassword = '';
-  String _displayName = ''; // ✅ NOU
+  String _displayName = ''; // NOU
 
   void _trySubmit() async {
     final isValid = _formKey.currentState!.validate();
@@ -35,26 +35,26 @@ class _AuthScreenState extends State<AuthScreen> {
 
       try {
         if (_isLogin) {
-          // ✅ LOGIN
+          // LOGIN
           await FirebaseAuth.instance.signInWithEmailAndPassword(
             email: _userEmail.trim(),
             password: _userPassword.trim(),
           );
 
-          // Actualizează last login
+          
           final user = FirebaseAuth.instance.currentUser;
           if (user != null) {
             await _userService.updateLastLogin(user.uid);
           }
         } else {
-          // ✅ SIGN UP
+          // SIGN UP
           final userCredential =
               await FirebaseAuth.instance.createUserWithEmailAndPassword(
             email: _userEmail.trim(),
             password: _userPassword.trim(),
           );
 
-          // Creează profilul user-ului
+          
           if (userCredential.user != null) {
             await _userService.createUserProfile(
               uid: userCredential.user!.uid,
@@ -62,7 +62,7 @@ class _AuthScreenState extends State<AuthScreen> {
               displayName: _displayName.trim(),
             );
 
-            // Setează display name în Firebase Auth
+            
             await userCredential.user!.updateDisplayName(_displayName.trim());
           }
         }
@@ -172,7 +172,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                           const SizedBox(height: 24),
 
-                          // ✅ Display Name (doar la Sign Up)
+                          // Display Name (doar la Sign Up)
                           if (!_isLogin) ...[
                             TextFormField(
                               key: const ValueKey('displayName'),

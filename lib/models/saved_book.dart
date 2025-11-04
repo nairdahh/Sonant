@@ -8,8 +8,8 @@ class SavedBook {
   final String title;
   final String author;
   final String format;
-  final String? coverImageUrl; // URL imagine copertă din Storage
-  final String fileUrl; // URL fișier din Storage
+  final String? coverImageUrl; // Cover image URL from Storage
+  final String fileUrl; // File URL from Storage
   final int lastPageIndex;
   final int totalPages;
   final DateTime lastReadAt;

@@ -95,7 +95,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         final fileBytes = result.files.first.bytes!;
         final fileName = result.files.first.name;
 
-        // Parsăm cartea
+        
         final parsedBook = await _bookParser.parseBook(fileBytes, fileName);
 
         if (parsedBook == null) {
@@ -109,7 +109,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
         setState(() => _uploadProgress = 0.5);
 
-        // Upload în Firebase
+        
         final savedBook = await _firestoreService.addBook(
           userId: user.uid,
           title: parsedBook.title,
@@ -157,7 +157,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         }
       }
     } catch (e) {
-      // Ignorăm erorile, vom folosi placeholder
+      
     }
     return null;
   }
@@ -175,7 +175,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
 
-    // Download fișier din Storage
+    
     final fileBytes = await _firestoreService.downloadBookFile(book.fileUrl);
 
     if (mounted) {
@@ -194,7 +194,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
 
-    // Navighează la reader
+    
     if (mounted) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -245,7 +245,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  // ✅ NOU: Meniu User
+  // NOU: Meniu User
   Widget _buildUserMenu(UserProfile? profile) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.account_circle, color: Colors.white),
@@ -319,7 +319,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       onSelected: (value) {
         switch (value) {
           case 'settings':
-            // TODO: Implementare settings în viitor
+            
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Settings - Coming soon!'),
@@ -328,7 +328,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             );
             break;
           case 'library':
-            // Deja suntem în library, dar poți face refresh sau scroll to top
+            
             break;
           case 'logout':
             FirebaseAuth.instance.signOut();
@@ -349,7 +349,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         backgroundColor: const Color(0xFF8B4513),
         foregroundColor: Colors.white,
         actions: [
-          // ✅ User Menu (înlocuiește butonul de logout)
+          
           if (user != null)
             StreamBuilder<UserProfile?>(
               stream: _userService.watchUserProfile(user.uid),
@@ -454,7 +454,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Copertă
+            
             Expanded(
               flex: 3,
               child: ClipRRect(

@@ -77,7 +77,7 @@ class _HighlightedTextState extends State<HighlightedText> {
     final wordBox = boxes.first;
     final wordBottom = wordBox.bottom;
 
-    // 🎯 Verificăm dacă am coborât rândul
+    // Verificăm dacă am coborât rândul
     final needsScroll =
         _lastHighlightBottom == null || wordBottom > _lastHighlightBottom! + 5;
 
@@ -92,7 +92,7 @@ class _HighlightedTextState extends State<HighlightedText> {
     // Poziția cuvântului în viewport
     final wordPositionInViewport = wordBottom - currentScroll;
 
-    // 🎯 Scroll doar dacă cuvântul e sub 75% din viewport
+    // Scroll doar dacă cuvântul e sub 75% din viewport
     final threshold = viewportHeight * 0.75;
 
     if (wordPositionInViewport > threshold) {

@@ -40,22 +40,22 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // 🌐 WEB: Hardcoded (Firebase keys sunt PUBLICE - e OK!)
-  // ✅ Aceste keys sunt SIGURE - protejate prin Firebase Security Rules
+  // WEB: Hardcoded (Firebase keys sunt PUBLICE - e OK!)
+  // Aceste keys sunt SIGURE - protejate prin Firebase Security Rules
   static const FirebaseOptions web = FirebaseOptions(
     apiKey:
-        'AIzaSyB8AOzUUeg4ne3BpVpj8z1Q5v8AjjmvDMc', // ← ÎnlocuieÈ™te cu al tău!
+        'AIzaSyB8AOzUUeg4ne3BpVpj8z1Q5v8AjjmvDMc', 
     appId:
-        '1:114372126413:web:2e1680af9a8d751e972b84', // ← ÎnlocuieÈ™te cu al tău!
-    messagingSenderId: '114372126413', // ← ÎnlocuieÈ™te cu al tău!
-    projectId: 'sonant-c81f1', // ← ÎnlocuieÈ™te cu al tău!
-    authDomain: 'sonant-c81f1.firebaseapp.com', // ← ÎnlocuieÈ™te cu al tău!
+        '1:114372126413:web:2e1680af9a8d751e972b84', 
+    messagingSenderId: '114372126413', 
+    projectId: 'sonant-c81f1', 
+    authDomain: 'sonant-c81f1.firebaseapp.com', 
     storageBucket:
-        'sonant-c81f1.firebasestorage.app', // ← ÎnlocuieÈ™te cu al tău!
-    measurementId: 'G-ZQZD52Y0LE', // ← ÎnlocuieÈ™te cu al tău!
+        'sonant-c81f1.firebasestorage.app', 
+    measurementId: 'G-ZQZD52Y0LE', 
   );
 
-  // 🤖 ANDROID: Din --dart-define (pentru builds production)
+  // ANDROID: Din --dart-define (pentru builds production)
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: String.fromEnvironment('ANDROID_API_KEY', defaultValue: ''),
     appId: String.fromEnvironment('ANDROID_APP_ID', defaultValue: ''),
@@ -65,7 +65,7 @@ class DefaultFirebaseOptions {
     storageBucket: String.fromEnvironment('STORAGE_BUCKET', defaultValue: ''),
   );
 
-  // 🍎 IOS: Din --dart-define
+  // IOS: Din --dart-define
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: String.fromEnvironment('IOS_API_KEY', defaultValue: ''),
     appId: String.fromEnvironment('IOS_APP_ID', defaultValue: ''),
@@ -76,7 +76,7 @@ class DefaultFirebaseOptions {
     iosBundleId: String.fromEnvironment('IOS_BUNDLE_ID', defaultValue: ''),
   );
 
-  // 🍎 MACOS: Același ca iOS
+  // Same as iOS
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: String.fromEnvironment('IOS_API_KEY', defaultValue: ''),
     appId: String.fromEnvironment('IOS_APP_ID', defaultValue: ''),
@@ -87,7 +87,7 @@ class DefaultFirebaseOptions {
     iosBundleId: String.fromEnvironment('IOS_BUNDLE_ID', defaultValue: ''),
   );
 
-  // 🪟 WINDOWS: Din --dart-define
+  // WINDOWS: Din --dart-define
   static const FirebaseOptions windows = FirebaseOptions(
     apiKey: String.fromEnvironment('WINDOWS_API_KEY', defaultValue: ''),
     appId: String.fromEnvironment('WINDOWS_APP_ID', defaultValue: ''),

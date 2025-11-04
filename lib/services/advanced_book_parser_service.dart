@@ -28,7 +28,7 @@ class AdvancedBookParser {
     }
   }
 
-  /// Parser EPUB AVANSAT - păstrează capitole, imagini, formatare
+  /// Advanced EPUB parser - preserves chapters, images, formatting
   Future<ParsedBook?> _parseEpubAdvanced(
       Uint8List fileBytes, String fileName) async {
     try {
@@ -37,7 +37,7 @@ class AdvancedBookParser {
       final title = epubBook.Title ?? fileName.replaceAll('.epub', '');
       final author = epubBook.Author ?? 'Autor necunoscut';
 
-      // 📚 Extragem CAPITOLE separate (nu text mare)
+      // Extragem CAPITOLE separate (nu text mare)
       final chapters = <BookChapter>[];
 
       if (epubBook.Chapters != null && epubBook.Chapters!.isNotEmpty) {
@@ -49,7 +49,7 @@ class AdvancedBookParser {
             chapters.add(chapter);
           }
 
-          // Procesăm și subcapitolele
+          
           if (epubChapter.SubChapters != null) {
             for (int j = 0; j < epubChapter.SubChapters!.length; j++) {
               final subChapter = await _parseChapter(
@@ -72,7 +72,7 @@ class AdvancedBookParser {
         return null;
       }
 
-      // 📄 Creăm pagini din capitole (max 400 cuvinte per pagină)
+      
       final pages = _createPagesFromChapters(chapters);
 
       return ParsedBook(
@@ -88,7 +88,7 @@ class AdvancedBookParser {
     }
   }
 
-  /// Parsează un capitol EPUB individual
+  /// Parses individual EPUB chapter
   Future<BookChapter?> _parseChapter(
     epubx.EpubChapter epubChapter,
     int chapterNumber,
@@ -101,7 +101,7 @@ class AdvancedBookParser {
 
       if (htmlContent.isEmpty) return null;
 
-      // 🎨 Parsăm HTML și păstrăm formatarea
+      
       final elements = _parseHtmlToElements(htmlContent, epubBook);
 
       if (elements.isEmpty) return null;
@@ -118,12 +118,12 @@ class AdvancedBookParser {
     }
   }
 
-  /// Parsează HTML și păstrează structura (paragrafe, imagini, bold, italic)
+  /// Parses HTML and preserves structure
   List<ChapterElement> _parseHtmlToElements(
       String html, epubx.EpubBook epubBook) {
     final elements = <ChapterElement>[];
 
-    // 🖼️ Prima dată, extragem TOATE imaginile din HTML (orice pozție)
+    // Extragem TOATE imaginile din HTML
     final imgRegexDouble =
         RegExp(r'<img[^>]+src="([^"]+)"[^>]*>', caseSensitive: false);
     final imgRegexSingle =
@@ -133,22 +133,15 @@ class AdvancedBookParser {
     final allImgMatchesSingle = imgRegexSingle.allMatches(html);
     final allImgMatches = [...allImgMatchesDouble, ...allImgMatchesSingle];
 
-    debugPrint('🖼️ Găsite ${allImgMatches.length} tag-uri <img> în HTML');
-
     for (final imgMatch in allImgMatches) {
       final imgSrc = imgMatch.group(1) ?? '';
-      debugPrint('🖼️ Procesăm img src: $imgSrc');
-
       final imageBytes = _extractImageFromEpub(imgSrc, epubBook);
 
       if (imageBytes != null) {
-        debugPrint('✅ Imagine extrasă cu succes! ${imageBytes.length} bytes');
         elements.add(ChapterElement.image(
           imageData: imageBytes,
           altText: 'Imagine',
         ));
-      } else {
-        debugPrint('❌ Nu s-a putut extrage imaginea');
       }
     }
 
@@ -158,16 +151,13 @@ class AdvancedBookParser {
 
     for (final match in pMatches) {
       final paragraphHtml = match.group(1) ?? '';
-
-      // Extragem textul și păstrăm formatarea simplă
       final textSpans = _parseInlineFormatting(paragraphHtml);
 
       if (textSpans.isNotEmpty) {
         elements.add(ChapterElement.paragraph(spans: textSpans));
       }
     }
-
-    // Dacă nu găsim paragrafe cu <p>, extragem direct textul
+    
     if (elements.where((e) => e.type == ChapterElementType.paragraph).isEmpty) {
       final cleanText = _stripHtmlTags(html).trim();
       if (cleanText.isNotEmpty) {
@@ -177,21 +167,15 @@ class AdvancedBookParser {
       }
     }
 
-    debugPrint('📄 Total elemente procesate: ${elements.length}');
-    debugPrint(
-        '   - Paragrafe: ${elements.where((e) => e.type == ChapterElementType.paragraph).length}');
-    debugPrint(
-        '   - Imagini: ${elements.where((e) => e.type == ChapterElementType.image).length}');
-
     return elements;
   }
 
-  /// Parsează formatare inline (bold, italic, etc.)
+  
   List<TextSpanData> _parseInlineFormatting(String html) {
     final spans = <TextSpanData>[];
 
     // Simplificat: extragem doar textul curat
-    // Poți extinde pentru <b>, <i>, <em>, <strong>
+    
     final cleanText = _stripHtmlTags(html).trim();
 
     if (cleanText.isNotEmpty) {
@@ -204,31 +188,18 @@ class AdvancedBookParser {
   /// Extrage imagini din EPUB
   Uint8List? _extractImageFromEpub(String imgSrc, epubx.EpubBook epubBook) {
     try {
-      debugPrint('🖼️ Căutăm imaginea: $imgSrc');
-
-      // Curățăm path-ul
+      
       String cleanSrc =
           imgSrc.replaceAll('../', '').replaceAll('./', '').trim();
 
-      debugPrint('🖼️ Path curățat: $cleanSrc');
-
-      // Căutăm în Images
+      
       if (epubBook.Content?.Images != null) {
-        debugPrint(
-            '🖼️ Total imagini în EPUB: ${epubBook.Content!.Images!.length}');
-
-        // Afișăm toate imaginile disponibile pentru debug
-        for (final image in epubBook.Content!.Images!.values) {
-          debugPrint('  - ${image.FileName}');
-        }
-
-        // Încercăm mai multe strategii de matching
+        
         for (final image in epubBook.Content!.Images!.values) {
           final fileName = image.FileName ?? '';
 
           // Strategy 1: Match exact
           if (fileName == cleanSrc) {
-            debugPrint('✅ Imagine găsită (exact match): $fileName');
             if (image.Content != null) {
               return Uint8List.fromList(image.Content!);
             }
@@ -236,7 +207,6 @@ class AdvancedBookParser {
 
           // Strategy 2: Ends with
           if (fileName.endsWith(cleanSrc)) {
-            debugPrint('✅ Imagine găsită (ends with): $fileName');
             if (image.Content != null) {
               return Uint8List.fromList(image.Content!);
             }
@@ -245,17 +215,15 @@ class AdvancedBookParser {
           // Strategy 3: Contains filename
           final srcFileName = cleanSrc.split('/').last;
           if (fileName.contains(srcFileName)) {
-            debugPrint('✅ Imagine găsită (contains): $fileName');
             if (image.Content != null) {
               return Uint8List.fromList(image.Content!);
             }
           }
         }
-      } else {
-        debugPrint('⚠️ EPUB nu are imagini în Content.Images');
       }
 
-      debugPrint('❌ Imagine nu găsită: $cleanSrc');
+      // Doar log pentru erori
+      debugPrint('⚠️ Imagine nu găsită: $cleanSrc');
       return null;
     } catch (e) {
       debugPrint('❌ Eroare la extragerea imaginii: $e');
@@ -263,7 +231,7 @@ class AdvancedBookParser {
     }
   }
 
-  /// Elimină tag-uri HTML
+  
   String _stripHtmlTags(String html) {
     return html
         .replaceAll(RegExp(r'<[^>]*>'), ' ')
@@ -277,21 +245,21 @@ class AdvancedBookParser {
         .trim();
   }
 
-  /// Creează pagini din capitole (max 400 cuvinte per pagină)
+  
   List<BookPage> _createPagesFromChapters(List<BookChapter> chapters) {
     final pages = <BookPage>[];
     int pageNumber = 1;
     int globalCharIndex = 0;
 
     for (final chapter in chapters) {
-      // Marcăm începutul capitolului
+      
       String currentPageContent = '';
       int currentWordCount = 0;
       int pageStartCharIndex = globalCharIndex;
       final List<ChapterElement> currentPageElements = [];
 
-      // ✅ NU mai adăugăm header-ul aici, îl vom afișa în UI
-      // Header-ul va fi afișat automat când isChapterStart = true
+      
+      
 
       for (final element in chapter.elements) {
         if (element.type == ChapterElementType.paragraph) {
@@ -301,10 +269,10 @@ class AdvancedBookParser {
               .where((w) => w.isNotEmpty)
               .length;
 
-          // Verificăm dacă depășim limita de 400 cuvinte
+          
           if (currentWordCount + paragraphWords > maxWordsPerPage &&
               currentPageContent.isNotEmpty) {
-            // Salvăm pagina curentă
+            
             pages.add(BookPage(
               pageNumber: pageNumber,
               content: currentPageContent.trim(),
@@ -315,7 +283,7 @@ class AdvancedBookParser {
               elements: List.from(currentPageElements),
             ));
 
-            // Începem pagina următoare
+            
             pageNumber++;
             pageStartCharIndex = globalCharIndex;
             currentPageContent = '';
@@ -323,19 +291,19 @@ class AdvancedBookParser {
             currentPageElements.clear();
           }
 
-          // Adăugăm paragraful
+          
           currentPageContent += '$paragraphText\n\n';
           currentWordCount += paragraphWords;
           currentPageElements.add(element);
           globalCharIndex += paragraphText.length + 2;
         } else if (element.type == ChapterElementType.image) {
-          // ✅ Adăugăm imaginea în elements, dar NU în currentPageContent
-          // Imaginea va fi afișată separat în UI
+          
+          
           currentPageElements.add(element);
         }
       }
 
-      // Salvăm ultima pagină a capitolului
+      
       if (currentPageContent.trim().isNotEmpty) {
         pages.add(BookPage(
           pageNumber: pageNumber,
@@ -369,7 +337,7 @@ class AdvancedBookParser {
 
       document.dispose();
 
-      // Creăm un capitol generic pentru PDF
+      
       final chapter = BookChapter(
         number: 1,
         title: fileName.replaceAll('.pdf', ''),

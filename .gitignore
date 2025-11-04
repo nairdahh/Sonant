@@ -91,3 +91,10 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 database-debug.log
+
+# AI/Claude tooling - DO NOT COMMIT
+.claude/
+.anthropic/
+.cursor/
+.aider*
+.copilot/

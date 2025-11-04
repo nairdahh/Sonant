@@ -21,7 +21,7 @@ class UserService {
     }
   }
 
-  /// Creează profilul unui user nou
+  /// Creates a new user profile
   Future<void> createUserProfile({
     required String uid,
     required String email,
@@ -45,7 +45,7 @@ class UserService {
     }
   }
 
-  /// Obține profilul unui user
+  /// Retrieves user profile
   Future<UserProfile?> getUserProfile(String uid) async {
     try {
       final doc = await _firestore.collection('users').doc(uid).get();
@@ -60,7 +60,7 @@ class UserService {
     }
   }
 
-  /// Stream pentru profilul user-ului
+  /// Stream for user profile updates
   Stream<UserProfile?> watchUserProfile(String uid) {
     return _firestore.collection('users').doc(uid).snapshots().map((doc) {
       if (doc.exists && doc.data() != null) {
@@ -70,7 +70,7 @@ class UserService {
     });
   }
 
-  /// Actualizează display name
+  /// Updates user display name
   Future<void> updateDisplayName(String uid, String displayName) async {
     try {
       await _firestore
@@ -78,7 +78,6 @@ class UserService {
           .doc(uid)
           .update({'displayName': displayName});
 
-      // Actualizează și în Firebase Auth
       await _auth.currentUser?.updateDisplayName(displayName);
 
       debugPrint('✅ Display name updated: $displayName');
@@ -88,7 +87,7 @@ class UserService {
     }
   }
 
-  /// Actualizează last login timestamp
+  /// Updates last login timestamp
   Future<void> updateLastLogin(String uid) async {
     try {
       await _firestore
@@ -100,7 +99,7 @@ class UserService {
     }
   }
 
-  /// Verifică dacă user-ul are profil configurat
+  /// Checks if user has configured profile
   Future<bool> hasProfile(String uid) async {
     try {
       final doc = await _firestore.collection('users').doc(uid).get();
