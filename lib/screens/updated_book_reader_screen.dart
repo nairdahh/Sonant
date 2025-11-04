@@ -243,7 +243,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       } else if (mounted) {
         // TTS failed to generate audio
         setState(() {
-          _lastError = 'Could not generate audio for this page. Please try again.';
+          _lastError =
+              'Could not generate audio for this page. Please try again.';
         });
       }
 
@@ -297,8 +298,9 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       if ((scaleFactor - 1.0).abs() > calibrationThreshold) {
         calibratedMarks = calibratedMarks.map((mark) {
           // Apply both scaling and global offset, then clamp to valid range
-          final adjustedTime = ((mark.time * scaleFactor).round() + globalOffsetMs)
-              .clamp(0, actualDurationMs);
+          final adjustedTime =
+              ((mark.time * scaleFactor).round() + globalOffsetMs)
+                  .clamp(0, actualDurationMs);
 
           return SpeechMark(
             time: adjustedTime,
@@ -337,11 +339,14 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
       // Try exact position first
       if (localStart >= 0 && localStart < pageContent.length) {
-        final expectedEnd = (localStart + mark.value.length).clamp(0, pageContent.length);
+        final expectedEnd =
+            (localStart + mark.value.length).clamp(0, pageContent.length);
         final textAtPosition = pageContent.substring(localStart, expectedEnd);
 
-        final cleanExpected = mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
-        final cleanActual = textAtPosition.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+        final cleanExpected =
+            mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+        final cleanActual =
+            textAtPosition.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
 
         if (cleanExpected == cleanActual) {
           wordHighlights.add(WordHighlight(
@@ -355,10 +360,12 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
       // Fallback: fuzzy search within 25 char window
       final searchStart = (localStart - 25).clamp(0, pageContent.length);
-      final searchEnd = (localStart + mark.value.length + 25).clamp(0, pageContent.length);
+      final searchEnd =
+          (localStart + mark.value.length + 25).clamp(0, pageContent.length);
       final searchArea = pageContent.substring(searchStart, searchEnd);
 
-      final cleanSearchWord = mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+      final cleanSearchWord =
+          mark.value.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
       final wordRegex = RegExp(r'\b\w+\b');
       final matches = wordRegex.allMatches(searchArea);
 
@@ -561,7 +568,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
       _audioCache.remove(key);
     }
     if (kDebugMode) {
-      debugPrint('Cleared ${keysToRemove.length} cached pages near current page');
+      debugPrint(
+          'Cleared ${keysToRemove.length} cached pages near current page');
     }
 
     if (_audioPlayer.duration != null) {
@@ -975,7 +983,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                               _highlightState.wordHighlights[wordIndex];
                           final cachedResponse = _audioCache[_currentPageIndex];
                           if (cachedResponse != null) {
-                            final globalIndex = cachedResponse.speechMarks.indexWhere(
+                            final globalIndex =
+                                cachedResponse.speechMarks.indexWhere(
                               (mark) =>
                                   mark.start - page.startCharIndex ==
                                   localHighlight.start,
@@ -1026,7 +1035,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: Colors.black.withOpacity(0.1),
             blurRadius: 8,
             offset: const Offset(0, -2),
           ),
@@ -1047,7 +1056,8 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                     child: LinearProgressIndicator(
                       value: _ttsProgress,
                       backgroundColor: Colors.grey[200],
-                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8B4513)),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                          Color(0xFF8B4513)),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1084,10 +1094,12 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                         _playCurrentPage();
                       },
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
                         minimumSize: Size.zero,
                       ),
-                      child: const Text('Retry', style: TextStyle(fontSize: 12)),
+                      child:
+                          const Text('Retry', style: TextStyle(fontSize: 12)),
                     ),
                   ],
                 ),
@@ -1245,7 +1257,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                           value: 'af_sky',
                           child: Text('Sky (US) ♀'),
                         ),
-
                         DropdownMenuItem(
                           value: 'am_adam',
                           child: Text('Adam (US) ♂'),
@@ -1254,7 +1265,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                           value: 'am_michael',
                           child: Text('Michael (US) ♂'),
                         ),
-
                         DropdownMenuItem(
                           value: 'bf_emma',
                           child: Text('Emma (UK) ♀'),
@@ -1263,7 +1273,6 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
                           value: 'bf_isabella',
                           child: Text('Isabella (UK) ♀'),
                         ),
-
                         DropdownMenuItem(
                           value: 'bm_george',
                           child: Text('George (UK) ♂'),
