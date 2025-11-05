@@ -5,7 +5,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import '../models/polly_response.dart';
+import '../models/tts_response.dart';
 
 class TTSService {
   static const String _kokoroUrl = 'https://tts.nairdah.me';
@@ -68,7 +68,7 @@ class TTSService {
   }
 
   /// Synthesizes speech using Kokoro TTS with retry and cancellation support
-  Future<PollyResponse?> synthesizeSpeech(
+  Future<TtsResponse?> synthesizeSpeech(
     String text, {
     String voiceId = 'af_bella',
     String? bookId,
@@ -172,7 +172,7 @@ class TTSService {
   }
 
   /// Parses Kokoro API response and converts timestamps to SpeechMarks
-  PollyResponse _parseKokoroResponse(String responseBody, String originalText) {
+  TtsResponse _parseKokoroResponse(String responseBody, String originalText) {
     try {
       final data = jsonDecode(responseBody);
 
@@ -202,7 +202,7 @@ class TTSService {
 
       for (var timestamp in timestampsJson) {
         final startTime = timestamp['start_time'] as num;
-        final timeMs = (startTime * 1000).round();
+        final timeMs = startTime * 1000.0;
 
         // Map to next available word position in original text
         if (wordIndex < wordPositions.length) {
@@ -222,7 +222,7 @@ class TTSService {
         }
       }
 
-      return PollyResponse(
+      return TtsResponse(
         audioUrl: audioDataUri,
         speechMarks: speechMarks,
       );

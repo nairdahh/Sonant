@@ -27,6 +27,45 @@ jobs:
       - name: 📦 Install Flutter dependencies
         run: flutter pub get
 
+      - name: 📝 Create .env file for build
+        run: |
+          mkdir -p assets
+          cat > assets/.env << 'EOF'
+          # ====================================
+          # PRODUCTION .env (Public configs only)
+          # ====================================
+          # NOTE: Firebase secrets are passed via --dart-define below
+          # This file will be included in the public web bundle
+
+          # TTS Service Configuration (safe to be public)
+          TTS_ENDPOINT=https://tts.nairdah.me
+          TTS_TIMEOUT_SECONDS=60
+          TTS_MAX_RETRIES=2
+          TTS_MAX_TEXT_LENGTH=5000
+          TTS_AVAILABLE_VOICES=af_bella,af_sarah,af_nicole,af_sky,am_adam,am_michael,bf_emma,bf_isabella,bm_george,bm_lewis
+          TTS_DEFAULT_VOICE=af_bella
+
+          # App Configuration
+          APP_NAME=Sonant Reader
+          APP_VERSION=1.0.0
+          APP_BUILD_NUMBER=1
+          APP_ENV=production
+
+          # Feature Flags
+          ENABLE_DEBUG_LOGS=false
+          ENABLE_ANALYTICS=true
+          ENABLE_CRASH_REPORTING=true
+
+          # Audio settings
+          DEFAULT_VOLUME=1.0
+          DEFAULT_PLAYBACK_SPEED=1.0
+          PRELOAD_PAGES_COUNT=2
+
+          # Cache settings
+          MAX_AUDIO_CACHE_SIZE=50
+          AUTO_SAVE_PROGRESS_INTERVAL_SECONDS=10
+          EOF
+
       - name: 🏗️ Build Flutter Web
         run: |
           flutter build web --release \
@@ -57,15 +96,6 @@ jobs:
       # ===== FIREBASE DEPLOY =====
       - name: 🔧 Setup Firebase CLI
         run: npm install -g firebase-tools
-
-      - name: 🔑 Configure AWS credentials for Functions
-        run: |
-          firebase functions:config:set \
-            aws.access_key_id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            aws.secret_access_key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-            aws.region="${{ secrets.AWS_REGION }}" \
-            --project ${{ secrets.FIREBASE_PROJECT_ID }} \
-            --token ${{ secrets.FIREBASE_TOKEN }}
 
       - name: 🚀 Deploy to Firebase
         run: |

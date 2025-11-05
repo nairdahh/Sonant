@@ -1,14 +1,14 @@
-// lib/models/polly_response.dart
+// lib/models/tts_response.dart
 
-class PollyResponse {
+class TtsResponse {
   final String? audioUrl;
   final List<SpeechMark> speechMarks;
 
-  PollyResponse({this.audioUrl, required this.speechMarks});
+  TtsResponse({this.audioUrl, required this.speechMarks});
 }
 
 class SpeechMark {
-  final int time;
+  final double time;
   final String type;
   final int start;
   final int end;

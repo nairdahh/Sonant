@@ -64,7 +64,6 @@ app.*.map.json
 firebase_config.json
 google-services.json
 GoogleService-Info.plist
-aws_credentials.json
 
 # Logs care pot conține keys
 *.log
@@ -92,9 +91,15 @@ firestore-debug.log
 ui-debug.log
 database-debug.log
 
-# AI/Claude tooling - DO NOT COMMIT
+# Development tooling and IDE configs - DO NOT COMMIT
 .claude/
 .anthropic/
 .cursor/
 .aider*
 .copilot/
+
+# Local documentation and setup files
+GITHUB_SECRETS_SETUP.md
+*_SETUP.md
+*_INSTRUCTIONS.md
+*_GUIDE.md

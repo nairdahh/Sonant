@@ -2,7 +2,7 @@
 
 import 'dart:async';
 import 'package:just_audio/just_audio.dart';
-import '../models/polly_response.dart';
+import '../models/tts_response.dart';
 import '../widgets/highlighted_text_widget.dart';
 
 class HighlightManager {
@@ -20,15 +20,6 @@ class HighlightManager {
   // Playback tracking pentru resume
   Duration? _lastPlaybackPosition;
   int? _lastPageIndex;
-
-  // Performance optimizations
-  int? _lastUpdateTimestamp;
-  Map<int, int> _timeToWordIndex = {};
-
-  // Look-ahead prediction to compensate for system lag
-  // Average lag: just_audio (60ms) + Flutter frame (12ms) + widget rebuild (8ms) = ~80ms
-  // Add 40ms buffer for safety → 120ms total look-ahead
-  static const int _lookAheadMs = 120;
 
   HighlightManager({
     required this.audioPlayer,
@@ -50,9 +41,6 @@ class HighlightManager {
     _wordHighlights = wordHighlights;
     _currentWordIndex = -1;
 
-    // Pre-build word index map for O(1) lookup performance
-    _buildWordIndexMap();
-
     // Start listening to position
     _startPositionTracking();
 
@@ -60,25 +48,13 @@ class HighlightManager {
     _notifyStateChanged();
   }
 
-  /// Pre-builds a HashMap for O(1) word index lookup
-  /// This eliminates the O(log n) binary search + O(n) counting overhead
-  void _buildWordIndexMap() {
-    _timeToWordIndex.clear();
-    int wordCount = 0;
-
-    for (int i = 0; i < _speechMarks.length; i++) {
-      if (_speechMarks[i].type == 'word') {
-        _timeToWordIndex[_speechMarks[i].time] = wordCount;
-        wordCount++;
-      }
-    }
-  }
-
   /// Start tracking poziție audio pentru highlight
   void _startPositionTracking() {
     _positionSubscription?.cancel();
     _fallbackTimer?.cancel();
 
+    // Use ONLY positionStream - no timer to avoid race conditions
+    // just_audio reports position accurately, trust it completely
     _positionSubscription = audioPlayer.positionStream.listen((position) {
       if (_speechMarks.isEmpty || _wordHighlights.isEmpty) return;
 
@@ -87,65 +63,29 @@ class HighlightManager {
       _lastPlaybackPosition = position;
       _lastPageIndex = _currentPageIndex;
 
-      _updateWordIndexWithPrediction(currentMillis);
-    });
-
-    // Increased frequency from 100ms to 33ms (30fps) for 3x smoother updates
-    // Trade-off: ~1-2% more CPU for significantly better responsiveness
-    _fallbackTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
-      if (audioPlayer.playing) {
-        final position = audioPlayer.position;
-        final currentMillis = position.inMilliseconds;
-
-        _updateWordIndexWithPrediction(currentMillis);
-      }
+      _updateWordIndex(currentMillis);
     });
   }
 
-  /// Updates word index with look-ahead prediction and race condition prevention
-  void _updateWordIndexWithPrediction(int currentMillis) {
-    // Prevent race conditions: skip duplicate updates within 10ms window
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (_lastUpdateTimestamp != null && now - _lastUpdateTimestamp! < 10) {
-      return;
-    }
-
-    // Apply look-ahead prediction to compensate for system lag
-    final predictedMillis = currentMillis + _lookAheadMs;
-
-    int newWordIndex = _findCurrentWordIndex(predictedMillis);
+  /// Updates word index based on current audio position
+  /// Matches highlights EXACTLY to Kokoro timestamps with zero artificial delay
+  void _updateWordIndex(int currentMillis) {
+    // Use actual audio position directly - Kokoro timestamps are accurate
+    // No lag compensation needed - highlights change exactly when word starts
+    int newWordIndex = _findCurrentWordIndex(currentMillis.toDouble());
 
     if (newWordIndex != _currentWordIndex) {
       _currentWordIndex = newWordIndex;
-      _lastUpdateTimestamp = now;
       _notifyStateChanged();
     }
   }
 
-  /// Finds current word index with O(1) HashMap lookup + fallback binary search
-  /// Optimized from O(log n + n) to O(1) average case
-  int _findCurrentWordIndex(int currentMillis) {
+  /// Finds current word index using O(log n) binary search
+  /// Directly returns word index without HashMap overhead
+  int _findCurrentWordIndex(double currentMillis) {
     if (_speechMarks.isEmpty) return -1;
 
-    // Fast path: O(1) HashMap lookup for exact timestamp match
-    if (_timeToWordIndex.isNotEmpty) {
-      // Find the largest timestamp <= currentMillis
-      int? bestWordIndex;
-      int bestTime = -1;
-
-      for (final entry in _timeToWordIndex.entries) {
-        if (entry.key <= currentMillis && entry.key > bestTime) {
-          bestTime = entry.key;
-          bestWordIndex = entry.value;
-        }
-      }
-
-      if (bestWordIndex != null) {
-        return bestWordIndex;
-      }
-    }
-
-    // Fallback to optimized binary search (rare case if HashMap not built)
+    // Binary search to find the rightmost word with time <= currentMillis
     int left = 0;
     int right = _speechMarks.length - 1;
     int result = -1;
@@ -154,29 +94,28 @@ class HighlightManager {
       int mid = (left + right) ~/ 2;
       final mark = _speechMarks[mid];
 
-      // Removed redundant type checking - all marks are 'word' type from TTS service
       if (mark.time <= currentMillis) {
-        result = mid;
+        // This could be our answer, but check if there's a better one to the right
+        if (mark.type == 'word') {
+          result = mid;
+        }
         left = mid + 1;
       } else {
         right = mid - 1;
       }
     }
 
-    if (result >= 0) {
-      // Fast counting with early exit
-      int wordCount = 0;
-      for (int i = 0; i <= result && i < _speechMarks.length; i++) {
-        if (_speechMarks[i].type == 'word') {
-          if (i == result) {
-            return wordCount;
-          }
-          wordCount++;
-        }
+    if (result == -1) return -1;
+
+    // Count how many words come before this index
+    int wordCount = 0;
+    for (int i = 0; i < result; i++) {
+      if (_speechMarks[i].type == 'word') {
+        wordCount++;
       }
     }
 
-    return -1;
+    return wordCount;
   }
 
   void pause() {

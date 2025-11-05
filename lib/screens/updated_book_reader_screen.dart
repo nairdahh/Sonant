@@ -10,7 +10,7 @@ import '../services/advanced_book_parser_service.dart';
 import '../services/tts_service.dart';
 import '../services/firestore_service.dart';
 import '../services/highlight_manager.dart';
-import '../models/polly_response.dart';
+import '../models/tts_response.dart';
 import '../models/saved_book.dart';
 import '../widgets/highlighted_text_widget.dart';
 
@@ -52,7 +52,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
   double _volume = 1.0;
   double _playbackSpeed = 1.0;
 
-  Map<int, PollyResponse> _audioCache = {};
+  Map<int, TtsResponse> _audioCache = {};
   Timer? _progressSaveTimer;
 
   // Tracks pages currently being preloaded to prevent duplicate requests
@@ -281,46 +281,22 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     await _audioPlayer.load();
 
     final actualDuration = _audioPlayer.duration;
-    List<SpeechMark> calibratedMarks = cachedResponse.speechMarks;
+    final speechMarks = cachedResponse.speechMarks;
 
-    // Aggressive auto-calibration with predictive offset
-    if (actualDuration != null && calibratedMarks.isNotEmpty) {
-      final estimatedDuration = calibratedMarks.last.time;
+    // Kokoro timestamps are in "base time" (same as just_audio position)
+    // No calibration needed - timestamps match audio position at all playback speeds
+    // Platform-specific lag is handled in HighlightManager
+    if (actualDuration != null && speechMarks.isNotEmpty) {
+      final lastTimestamp = speechMarks.last.time;
       final actualDurationMs = actualDuration.inMilliseconds;
+      final difference = (actualDurationMs - lastTimestamp).abs();
 
-      final scaleFactor = actualDurationMs / estimatedDuration;
-
-      // Reduced threshold from 3% to 0.5% for more accurate calibration
-      // Global offset: -80ms advances highlights to compensate for audio pipeline latency
-      const double calibrationThreshold = 0.005;
-      const int globalOffsetMs = -80;
-
-      if ((scaleFactor - 1.0).abs() > calibrationThreshold) {
-        calibratedMarks = calibratedMarks.map((mark) {
-          // Apply both scaling and global offset, then clamp to valid range
-          final adjustedTime =
-              ((mark.time * scaleFactor).round() + globalOffsetMs)
-                  .clamp(0, actualDurationMs);
-
-          return SpeechMark(
-            time: adjustedTime,
-            type: mark.type,
-            start: mark.start,
-            end: mark.end,
-            value: mark.value,
-          );
-        }).toList();
-      } else {
-        // Even if scaling not needed, apply global offset for latency compensation
-        calibratedMarks = calibratedMarks.map((mark) {
-          return SpeechMark(
-            time: (mark.time + globalOffsetMs).clamp(0, actualDurationMs),
-            type: mark.type,
-            start: mark.start,
-            end: mark.end,
-            value: mark.value,
-          );
-        }).toList();
+      // Log significant duration mismatches for debugging (shouldn't happen with Kokoro)
+      if (difference > 100) {
+        if (kDebugMode) {
+          debugPrint(
+              'Duration mismatch: audio=${actualDurationMs}ms, last_timestamp=${lastTimestamp}ms, diff=${difference}ms');
+        }
       }
     }
 
@@ -328,7 +304,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
     final wordHighlights = <WordHighlight>[];
     final pageContent = page.content;
 
-    for (final mark in calibratedMarks) {
+    for (final mark in speechMarks) {
       if (mark.type != 'word') continue;
 
       if (mark.start < page.startCharIndex || mark.start >= page.endCharIndex) {
@@ -400,7 +376,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
 
     _highlightManager.initializeForPage(
       pageIndex: pageIndex,
-      speechMarks: calibratedMarks,
+      speechMarks: speechMarks,
       wordHighlights: wordHighlights,
     );
 
@@ -455,7 +431,7 @@ class _UpdatedBookReaderScreenState extends State<UpdatedBookReaderScreen> {
           );
         }).toList();
 
-        _audioCache[pageIndex] = PollyResponse(
+        _audioCache[pageIndex] = TtsResponse(
           audioUrl: ttsResponse.audioUrl,
           speechMarks: adjustedMarks,
         );
