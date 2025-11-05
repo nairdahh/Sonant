@@ -76,22 +76,6 @@ jobs:
             --dart-define=WEB_APP_ID=${{ secrets.WEB_APP_ID }} \
             --dart-define=WEB_AUTH_DOMAIN=${{ secrets.WEB_AUTH_DOMAIN }} \
             --dart-define=WEB_MEASUREMENT_ID=${{ secrets.WEB_MEASUREMENT_ID }}
-      
-      # ===== FIREBASE FUNCTIONS BUILD =====
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: functions/package-lock.json
-
-      - name: 📦 Install Functions dependencies
-        working-directory: functions
-        run: npm ci
-
-      - name: 🏗️ Build Functions
-        working-directory: functions
-        run: npm run build
 
       # ===== FIREBASE DEPLOY =====
       - name: 🔧 Setup Firebase CLI
@@ -100,7 +84,7 @@ jobs:
       - name: 🚀 Deploy to Firebase
         run: |
           firebase deploy \
-            --only functions,hosting \
+            --only hosting \
             --project ${{ secrets.FIREBASE_PROJECT_ID }} \
             --token ${{ secrets.FIREBASE_TOKEN }} \
             --non-interactive
