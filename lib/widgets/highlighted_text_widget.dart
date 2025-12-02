@@ -153,12 +153,13 @@ class _HighlightedTextState extends State<HighlightedText> {
           child: _HighlightedWord(
             text: wordText,
             style: widget.style?.copyWith(
-              fontWeight: FontWeight.w500,
-              color: const Color(0xFF6B5B95), // Primary purple from theme
-            ) ?? const TextStyle(
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF6B5B95),
-            ),
+                  fontWeight: FontWeight.w500,
+                  color: const Color(0xFF6B5B95), // Primary purple from theme
+                ) ??
+                const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B5B95),
+                ),
           ),
         ));
       } else {

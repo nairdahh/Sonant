@@ -2258,8 +2258,9 @@ class _UpdatedBookReaderScreenState
                               fontScale: tempFontScale,
                               lineHeight: tempLineHeight,
                             ),
-                            textAlign:
-                                tempJustify ? TextAlign.justify : TextAlign.left,
+                            textAlign: tempJustify
+                                ? TextAlign.justify
+                                : TextAlign.left,
                           ),
                         ),
                       ),
