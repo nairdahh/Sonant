@@ -14,6 +14,7 @@ class SavedBook {
   final int totalPages;
   final DateTime lastReadAt;
   final DateTime addedAt;
+  final String? contentHash; // SHA-256 hash for cache invalidation
 
   SavedBook({
     required this.id,
@@ -27,6 +28,7 @@ class SavedBook {
     required this.totalPages,
     required this.lastReadAt,
     required this.addedAt,
+    this.contentHash,
   });
 
   double get progressPercentage {
@@ -47,6 +49,7 @@ class SavedBook {
       'totalPages': totalPages,
       'lastReadAt': Timestamp.fromDate(lastReadAt),
       'addedAt': Timestamp.fromDate(addedAt),
+      'contentHash': contentHash,
     };
   }
 
@@ -63,6 +66,7 @@ class SavedBook {
       totalPages: map['totalPages'] ?? 0,
       lastReadAt: (map['lastReadAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       addedAt: (map['addedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      contentHash: map['contentHash'],
     );
   }
 
@@ -78,6 +82,7 @@ class SavedBook {
     int? totalPages,
     DateTime? lastReadAt,
     DateTime? addedAt,
+    String? contentHash,
   }) {
     return SavedBook(
       id: id ?? this.id,
@@ -91,6 +96,7 @@ class SavedBook {
       totalPages: totalPages ?? this.totalPages,
       lastReadAt: lastReadAt ?? this.lastReadAt,
       addedAt: addedAt ?? this.addedAt,
+      contentHash: contentHash ?? this.contentHash,
     );
   }
 }

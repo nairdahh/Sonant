@@ -5,22 +5,23 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:http/http.dart' as http; // NOU
+import 'package:crypto/crypto.dart';
 import '../models/saved_book.dart';
 
 class FirestoreService {
-  
   late final FirebaseFirestore _firestore;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final _uuid = const Uuid();
 
+  // Static flag to prevent repeated init logs
+  static bool _initialized = false;
+
   FirestoreService() {
     try {
-      
       if (kIsWeb) {
-        
         _firestore = FirebaseFirestore.instanceFor(
           app: FirebaseFirestore.instance.app,
-          databaseId: 'sonantdb', 
+          databaseId: 'sonantdb',
         );
 
         // Settings pentru Web
@@ -28,11 +29,18 @@ class FirestoreService {
           persistenceEnabled: false,
         );
 
-        debugPrint('✅ Firestore inițializat cu database: sonantdb');
+        // Only log once
+        if (!_initialized && kDebugMode) {
+          debugPrint('✅ Firestore inițializat cu database: sonantdb');
+          _initialized = true;
+        }
       } else {
         // Pentru mobile, poate folosi default
         _firestore = FirebaseFirestore.instance;
-        debugPrint('✅ Firestore inițializat cu database default');
+        if (!_initialized && kDebugMode) {
+          debugPrint('✅ Firestore inițializat cu database default');
+          _initialized = true;
+        }
       }
     } catch (e) {
       debugPrint('❌ Eroare inițializare Firestore: $e');
@@ -64,14 +72,12 @@ class FirestoreService {
 
       debugPrint('   ✅ Scriere testată cu succes');
 
-      
       final verifyDoc =
           await _firestore.collection('_test').doc('connection_test').get();
 
       if (verifyDoc.exists) {
         debugPrint('   ✅ Verificare reușită: ${verifyDoc.data()}');
 
-        
         await _firestore.collection('_test').doc('connection_test').delete();
 
         return true;
@@ -117,7 +123,6 @@ class FirestoreService {
       debugPrint('   User ID: $userId');
       debugPrint('   Book ID: $bookId');
 
-      
       debugPrint('   Upload fișier în Storage...');
       final fileRef =
           _storage.ref().child('users/$userId/books/$bookId/$fileName');
@@ -128,7 +133,10 @@ class FirestoreService {
       final fileUrl = await uploadTask.ref.getDownloadURL();
       debugPrint('   ✅ Fișier uploadat: $fileUrl');
 
-      
+      // Compute content hash for cache invalidation
+      final contentHash = sha256.convert(fileBytes).toString();
+      debugPrint('   📝 Content hash: $contentHash');
+
       String? coverImageUrl;
       if (coverImageBytes != null) {
         debugPrint('   Upload copertă...');
@@ -156,6 +164,7 @@ class FirestoreService {
         totalPages: totalPages,
         lastReadAt: DateTime.now(),
         addedAt: DateTime.now(),
+        contentHash: contentHash,
       );
 
       await _firestore

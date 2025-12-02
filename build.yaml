@@ -1,0 +1,12 @@
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          create_to_json: true
+      freezed:
+        options:
+          map_generic: true
+      riverpod_generator:
+        options:
+          override_family: true

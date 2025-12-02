@@ -143,17 +143,33 @@ class _HighlightedTextState extends State<HighlightedText> {
       final isCurrentWord = i == widget.currentHighlightIndex;
       final wordText = widget.text.substring(highlight.start, highlight.end);
 
-      spans.add(TextSpan(
-        text: wordText,
-        style: widget.style?.copyWith(
-          backgroundColor: isCurrentWord
-              ? Colors.yellow.withOpacity(0.6)
-              : Colors.transparent,
-          fontWeight: isCurrentWord ? FontWeight.bold : FontWeight.normal,
-        ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () => widget.onWordTap?.call(i),
-      ));
+      // Highlight with visual padding that doesn't affect text layout
+      if (isCurrentWord) {
+        // Use WidgetSpan with a custom widget that has visual padding
+        // without affecting the actual text positioning
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: _HighlightedWord(
+            text: wordText,
+            style: widget.style?.copyWith(
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFF6B5B95), // Primary purple from theme
+            ) ?? const TextStyle(
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF6B5B95),
+            ),
+          ),
+        ));
+      } else {
+        spans.add(TextSpan(
+          text: wordText,
+          style: widget.style,
+          recognizer: TapGestureRecognizer()
+            ..onTap = () => widget.onWordTap?.call(i),
+          mouseCursor: SystemMouseCursors.click,
+        ));
+      }
 
       lastEnd = highlight.end;
     }
@@ -187,9 +203,58 @@ class WordHighlight {
   final int end;
   final String word;
 
-  WordHighlight({
+  // Sentence/paragraph boundaries for context highlighting
+  final int? sentenceStart;
+  final int? sentenceEnd;
+
+  const WordHighlight({
     required this.start,
     required this.end,
     required this.word,
+    this.sentenceStart,
+    this.sentenceEnd,
   });
+}
+
+/// A widget that displays a highlighted word with visual padding
+/// that doesn't affect the surrounding text layout.
+/// Uses a Stack with an expanded background layer.
+class _HighlightedWord extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+
+  const _HighlightedWord({
+    required this.text,
+    required this.style,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Use a Stack to overlay the background behind the text
+    // The background extends beyond the text bounds using Transform
+    // but the layout is determined only by the text size
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // Background layer - extends visually with padding but doesn't affect layout
+        Positioned.fill(
+          left: -3,
+          right: -3,
+          top: -2,
+          bottom: -2,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8E4F0), // Soft lavender highlight
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        // Text layer - determines the actual layout size
+        Text(
+          text,
+          style: style,
+        ),
+      ],
+    );
+  }
 }

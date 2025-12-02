@@ -4,20 +4,46 @@ import 'package:flutter/foundation.dart';
 import 'package:epubx/epubx.dart' as epubx;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+/// Progress callback for book parsing
+typedef ParseProgressCallback = void Function(double progress, String status);
+
+/// Top-level function for isolate - reads EPUB
+Future<epubx.EpubBook?> _readEpubInIsolate(Uint8List fileBytes) async {
+  try {
+    return await epubx.EpubReader.readBook(fileBytes);
+  } catch (e) {
+    return null;
+  }
+}
+
 class AdvancedBookParser {
   static const int maxWordsPerPage = 400;
+  static final RegExp _imgTagDoubleQuote =
+      RegExp(r'<img[^>]+src="([^"]+)"[^>]*>', caseSensitive: false);
+  static final RegExp _imgTagSingleQuote =
+      RegExp(r"<img[^>]+src='([^']+)'[^>]*>", caseSensitive: false);
+  static final RegExp _paragraphRegex =
+      RegExp(r'<p[^>]*>(.*?)</p>', dotAll: true);
 
-  Future<ParsedBook?> parseBook(Uint8List fileBytes, String fileName) async {
+  /// Parse book with optional progress callback
+  /// Runs heavy parsing in background isolate to avoid blocking UI
+  Future<ParsedBook?> parseBook(
+    Uint8List fileBytes,
+    String fileName, {
+    ParseProgressCallback? onProgress,
+  }) async {
     try {
       final extension = fileName.toLowerCase().split('.').last;
 
+      onProgress?.call(0.1, 'Starting...');
+
       switch (extension) {
         case 'epub':
-          return await _parseEpubAdvanced(fileBytes, fileName);
+          return await _parseEpubAdvanced(fileBytes, fileName, onProgress);
         case 'pdf':
-          return await _parsePdf(fileBytes, fileName);
+          return await _parsePdf(fileBytes, fileName, onProgress);
         case 'txt':
-          return await _parseTxt(fileBytes, fileName);
+          return await _parseTxt(fileBytes, fileName, onProgress);
         default:
           debugPrint('Format nesuportat: $extension');
           return null;
@@ -28,20 +54,35 @@ class AdvancedBookParser {
     }
   }
 
-  /// Advanced EPUB parser - preserves chapters, images, formatting
+  /// Parser EPUB avansat: extrage capitole, imagini și paginează conținutul
   Future<ParsedBook?> _parseEpubAdvanced(
-      Uint8List fileBytes, String fileName) async {
+    Uint8List fileBytes,
+    String fileName,
+    ParseProgressCallback? onProgress,
+  ) async {
     try {
-      final epubBook = await epubx.EpubReader.readBook(fileBytes);
+      onProgress?.call(0.15, 'Reading EPUB...');
+
+      // Use compute for heavy EPUB reading
+      final epubBook = await compute(_readEpubInIsolate, fileBytes);
+      if (epubBook == null) return null;
 
       final title = epubBook.Title ?? fileName.replaceAll('.epub', '');
       final author = epubBook.Author ?? 'Autor necunoscut';
-
-      // Extragem CAPITOLE separate (nu text mare)
       final chapters = <BookChapter>[];
 
       if (epubBook.Chapters != null && epubBook.Chapters!.isNotEmpty) {
-        for (int i = 0; i < epubBook.Chapters!.length; i++) {
+        final totalChapters = epubBook.Chapters!.length;
+
+        for (int i = 0; i < totalChapters; i++) {
+          // Report progress
+          final chapterProgress = 0.2 + (0.5 * (i / totalChapters));
+          onProgress?.call(
+              chapterProgress, 'Processing chapter ${i + 1}/$totalChapters...');
+
+          // Yield to UI between chapters
+          await Future.delayed(Duration.zero);
+
           final epubChapter = epubBook.Chapters![i];
           final chapter = await _parseChapter(epubChapter, i + 1, epubBook);
 
@@ -49,7 +90,6 @@ class AdvancedBookParser {
             chapters.add(chapter);
           }
 
-          
           if (epubChapter.SubChapters != null) {
             for (int j = 0; j < epubChapter.SubChapters!.length; j++) {
               final subChapter = await _parseChapter(
@@ -72,8 +112,14 @@ class AdvancedBookParser {
         return null;
       }
 
-      
+      onProgress?.call(0.8, 'Creating pages...');
+
+      // Yield before heavy page creation
+      await Future.delayed(Duration.zero);
+
       final pages = _createPagesFromChapters(chapters);
+
+      onProgress?.call(1.0, 'Done!');
 
       return ParsedBook(
         title: title,
@@ -101,7 +147,6 @@ class AdvancedBookParser {
 
       if (htmlContent.isEmpty) return null;
 
-      
       final elements = _parseHtmlToElements(htmlContent, epubBook);
 
       if (elements.isEmpty) return null;
@@ -124,13 +169,8 @@ class AdvancedBookParser {
     final elements = <ChapterElement>[];
 
     // Extragem TOATE imaginile din HTML
-    final imgRegexDouble =
-        RegExp(r'<img[^>]+src="([^"]+)"[^>]*>', caseSensitive: false);
-    final imgRegexSingle =
-        RegExp(r"<img[^>]+src='([^']+)'[^>]*>", caseSensitive: false);
-
-    final allImgMatchesDouble = imgRegexDouble.allMatches(html);
-    final allImgMatchesSingle = imgRegexSingle.allMatches(html);
+    final allImgMatchesDouble = _imgTagDoubleQuote.allMatches(html);
+    final allImgMatchesSingle = _imgTagSingleQuote.allMatches(html);
     final allImgMatches = [...allImgMatchesDouble, ...allImgMatchesSingle];
 
     for (final imgMatch in allImgMatches) {
@@ -146,8 +186,7 @@ class AdvancedBookParser {
     }
 
     // Regex pentru paragrafe <p>...</p>
-    final pRegex = RegExp(r'<p[^>]*>(.*?)</p>', dotAll: true);
-    final pMatches = pRegex.allMatches(html);
+    final pMatches = _paragraphRegex.allMatches(html);
 
     for (final match in pMatches) {
       final paragraphHtml = match.group(1) ?? '';
@@ -157,7 +196,7 @@ class AdvancedBookParser {
         elements.add(ChapterElement.paragraph(spans: textSpans));
       }
     }
-    
+
     if (elements.where((e) => e.type == ChapterElementType.paragraph).isEmpty) {
       final cleanText = _stripHtmlTags(html).trim();
       if (cleanText.isNotEmpty) {
@@ -170,12 +209,11 @@ class AdvancedBookParser {
     return elements;
   }
 
-  
   List<TextSpanData> _parseInlineFormatting(String html) {
     final spans = <TextSpanData>[];
 
     // Simplificat: extragem doar textul curat
-    
+
     final cleanText = _stripHtmlTags(html).trim();
 
     if (cleanText.isNotEmpty) {
@@ -188,13 +226,10 @@ class AdvancedBookParser {
   /// Extrage imagini din EPUB
   Uint8List? _extractImageFromEpub(String imgSrc, epubx.EpubBook epubBook) {
     try {
-      
       String cleanSrc =
           imgSrc.replaceAll('../', '').replaceAll('./', '').trim();
 
-      
       if (epubBook.Content?.Images != null) {
-        
         for (final image in epubBook.Content!.Images!.values) {
           final fileName = image.FileName ?? '';
 
@@ -231,7 +266,6 @@ class AdvancedBookParser {
     }
   }
 
-  
   String _stripHtmlTags(String html) {
     return html
         .replaceAll(RegExp(r'<[^>]*>'), ' ')
@@ -245,21 +279,39 @@ class AdvancedBookParser {
         .trim();
   }
 
-  
   List<BookPage> _createPagesFromChapters(List<BookChapter> chapters) {
     final pages = <BookPage>[];
     int pageNumber = 1;
     int globalCharIndex = 0;
 
     for (final chapter in chapters) {
-      
-      String currentPageContent = '';
+      final currentPageBuffer = StringBuffer();
       int currentWordCount = 0;
       int pageStartCharIndex = globalCharIndex;
       final List<ChapterElement> currentPageElements = [];
 
-      
-      
+      void commitPage() {
+        final content = currentPageBuffer.toString().trim();
+        if (content.isEmpty) {
+          return;
+        }
+        pages.add(
+          BookPage(
+            pageNumber: pageNumber,
+            content: content,
+            startCharIndex: pageStartCharIndex,
+            endCharIndex: globalCharIndex,
+            chapterNumber: chapter.number,
+            chapterTitle: chapter.title,
+            elements: List<ChapterElement>.from(currentPageElements),
+          ),
+        );
+        pageNumber++;
+        pageStartCharIndex = globalCharIndex;
+        currentPageBuffer.clear();
+        currentWordCount = 0;
+        currentPageElements.clear();
+      }
 
       for (final element in chapter.elements) {
         if (element.type == ChapterElementType.paragraph) {
@@ -269,52 +321,24 @@ class AdvancedBookParser {
               .where((w) => w.isNotEmpty)
               .length;
 
-          
           if (currentWordCount + paragraphWords > maxWordsPerPage &&
-              currentPageContent.isNotEmpty) {
-            
-            pages.add(BookPage(
-              pageNumber: pageNumber,
-              content: currentPageContent.trim(),
-              startCharIndex: pageStartCharIndex,
-              endCharIndex: globalCharIndex,
-              chapterNumber: chapter.number,
-              chapterTitle: chapter.title,
-              elements: List.from(currentPageElements),
-            ));
-
-            
-            pageNumber++;
-            pageStartCharIndex = globalCharIndex;
-            currentPageContent = '';
-            currentWordCount = 0;
-            currentPageElements.clear();
+              currentPageBuffer.length > 0) {
+            commitPage();
           }
 
-          
-          currentPageContent += '$paragraphText\n\n';
+          currentPageBuffer
+            ..write(paragraphText)
+            ..write('\n\n');
           currentWordCount += paragraphWords;
           currentPageElements.add(element);
           globalCharIndex += paragraphText.length + 2;
         } else if (element.type == ChapterElementType.image) {
-          
-          
           currentPageElements.add(element);
         }
       }
 
-      
-      if (currentPageContent.trim().isNotEmpty) {
-        pages.add(BookPage(
-          pageNumber: pageNumber,
-          content: currentPageContent.trim(),
-          startCharIndex: pageStartCharIndex,
-          endCharIndex: globalCharIndex,
-          chapterNumber: chapter.number,
-          chapterTitle: chapter.title,
-          elements: List.from(currentPageElements),
-        ));
-        pageNumber++;
+      if (currentPageBuffer.length > 0) {
+        commitPage();
       }
     }
 
@@ -322,33 +346,65 @@ class AdvancedBookParser {
   }
 
   /// Parser PDF (similar cu cel vechi)
-  Future<ParsedBook?> _parsePdf(Uint8List fileBytes, String fileName) async {
+  Future<ParsedBook?> _parsePdf(
+    Uint8List fileBytes,
+    String fileName,
+    ParseProgressCallback? onProgress,
+  ) async {
     try {
-      final PdfDocument document = PdfDocument(inputBytes: fileBytes);
-      String fullText = '';
+      onProgress?.call(0.2, 'Reading PDF...');
 
-      for (int i = 0; i < document.pages.count; i++) {
+      final PdfDocument document = PdfDocument(inputBytes: fileBytes);
+      final pages = <BookPage>[];
+      int globalCharIndex = 0;
+
+      final allElements = <ChapterElement>[];
+      final totalPdfPages = document.pages.count;
+
+      for (int i = 0; i < totalPdfPages; i++) {
+        // Report progress
+        final pageProgress = 0.2 + (0.7 * (i / totalPdfPages));
+        onProgress?.call(
+            pageProgress, 'Processing page ${i + 1}/$totalPdfPages...');
+
+        // Yield to UI between pages
+        await Future.delayed(Duration.zero);
+
         final String pageText = PdfTextExtractor(document).extractText(
           startPageIndex: i,
           endPageIndex: i,
         );
-        fullText += '$pageText\n\n';
+
+        // Clean text slightly but keep structure
+        final cleanPageText = pageText.trim();
+
+        final pageElements = [
+          ChapterElement.paragraph(spans: [TextSpanData(text: cleanPageText)])
+        ];
+        allElements.addAll(pageElements);
+
+        pages.add(BookPage(
+          pageNumber: i + 1,
+          content: cleanPageText,
+          startCharIndex: globalCharIndex,
+          endCharIndex: globalCharIndex + cleanPageText.length,
+          chapterNumber: 1,
+          chapterTitle: fileName.replaceAll('.pdf', ''),
+          elements: pageElements,
+        ));
+
+        globalCharIndex += cleanPageText.length + 2; // +2 for newline/spacing
       }
 
       document.dispose();
 
-      
+      onProgress?.call(1.0, 'Done!');
+
       final chapter = BookChapter(
         number: 1,
         title: fileName.replaceAll('.pdf', ''),
-        elements: [
-          ChapterElement.paragraph(
-            spans: [TextSpanData(text: fullText)],
-          )
-        ],
+        elements: allElements,
       );
-
-      final pages = _createPagesFromChapters([chapter]);
 
       return ParsedBook(
         title: fileName.replaceAll('.pdf', ''),
@@ -364,9 +420,17 @@ class AdvancedBookParser {
   }
 
   /// Parser TXT (similar cu cel vechi)
-  Future<ParsedBook?> _parseTxt(Uint8List fileBytes, String fileName) async {
+  Future<ParsedBook?> _parseTxt(
+    Uint8List fileBytes,
+    String fileName,
+    ParseProgressCallback? onProgress,
+  ) async {
     try {
+      onProgress?.call(0.3, 'Reading text file...');
+
       final text = String.fromCharCodes(fileBytes);
+
+      onProgress?.call(0.6, 'Creating pages...');
 
       final chapter = BookChapter(
         number: 1,
@@ -379,6 +443,8 @@ class AdvancedBookParser {
       );
 
       final pages = _createPagesFromChapters([chapter]);
+
+      onProgress?.call(1.0, 'Done!');
 
       return ParsedBook(
         title: fileName.replaceAll('.txt', ''),
@@ -410,6 +476,29 @@ class ParsedBook {
     required this.pages,
     required this.format,
   });
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'author': author,
+        'chapters': chapters.map((c) => c.toJson()).toList(),
+        'pages': pages.map((p) => p.toJson()).toList(),
+        'format': format.name,
+      };
+
+  factory ParsedBook.fromJson(Map<String, dynamic> json) => ParsedBook(
+        title: json['title'] as String,
+        author: json['author'] as String,
+        chapters: (json['chapters'] as List)
+            .map((c) => BookChapter.fromJson(c as Map<String, dynamic>))
+            .toList(),
+        pages: (json['pages'] as List)
+            .map((p) => BookPage.fromJson(p as Map<String, dynamic>))
+            .toList(),
+        format: BookFormat.values.firstWhere(
+          (f) => f.name == json['format'],
+          orElse: () => BookFormat.epub,
+        ),
+      );
 }
 
 class BookChapter {
@@ -424,6 +513,22 @@ class BookChapter {
     required this.elements,
     this.isSubChapter = false,
   });
+
+  Map<String, dynamic> toJson() => {
+        'number': number,
+        'title': title,
+        'elements': elements.map((e) => e.toJson()).toList(),
+        'isSubChapter': isSubChapter,
+      };
+
+  factory BookChapter.fromJson(Map<String, dynamic> json) => BookChapter(
+        number: json['number'] as int,
+        title: json['title'] as String,
+        elements: (json['elements'] as List)
+            .map((e) => ChapterElement.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        isSubChapter: json['isSubChapter'] as bool? ?? false,
+      );
 }
 
 enum ChapterElementType { paragraph, image, heading }
@@ -463,6 +568,31 @@ class ChapterElement {
       spans: [TextSpanData(text: text, isBold: true)],
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'type': type.name,
+        'spans': spans.map((s) => s.toJson()).toList(),
+        'imageData': imageData?.toList(),
+        'altText': altText,
+      };
+
+  factory ChapterElement.fromJson(Map<String, dynamic> json) {
+    final typeStr = json['type'] as String;
+    final type = ChapterElementType.values.firstWhere(
+      (t) => t.name == typeStr,
+      orElse: () => ChapterElementType.paragraph,
+    );
+    return ChapterElement._(
+      type: type,
+      spans: (json['spans'] as List? ?? [])
+          .map((s) => TextSpanData.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      imageData: json['imageData'] != null
+          ? Uint8List.fromList(List<int>.from(json['imageData']))
+          : null,
+      altText: json['altText'] as String?,
+    );
+  }
 }
 
 class TextSpanData {
@@ -475,6 +605,18 @@ class TextSpanData {
     this.isBold = false,
     this.isItalic = false,
   });
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'isBold': isBold,
+        'isItalic': isItalic,
+      };
+
+  factory TextSpanData.fromJson(Map<String, dynamic> json) => TextSpanData(
+        text: json['text'] as String,
+        isBold: json['isBold'] as bool? ?? false,
+        isItalic: json['isItalic'] as bool? ?? false,
+      );
 }
 
 class BookPage {
@@ -495,6 +637,28 @@ class BookPage {
     required this.chapterTitle,
     this.elements = const [],
   });
+
+  Map<String, dynamic> toJson() => {
+        'pageNumber': pageNumber,
+        'content': content,
+        'startCharIndex': startCharIndex,
+        'endCharIndex': endCharIndex,
+        'chapterNumber': chapterNumber,
+        'chapterTitle': chapterTitle,
+        'elements': elements.map((e) => e.toJson()).toList(),
+      };
+
+  factory BookPage.fromJson(Map<String, dynamic> json) => BookPage(
+        pageNumber: json['pageNumber'] as int,
+        content: json['content'] as String,
+        startCharIndex: json['startCharIndex'] as int,
+        endCharIndex: json['endCharIndex'] as int,
+        chapterNumber: json['chapterNumber'] as int,
+        chapterTitle: json['chapterTitle'] as String,
+        elements: (json['elements'] as List? ?? [])
+            .map((e) => ChapterElement.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
 }
 
 enum BookFormat { pdf, epub, txt }
